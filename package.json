@@ -15,6 +15,6 @@
     "node": ">=18"
   },
   "dependencies": {
-    "dotenv-native": "^1.0.1"
+    "dotenv-buffers": "^1.0.0"
   }
 }
