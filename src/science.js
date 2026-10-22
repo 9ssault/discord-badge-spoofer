@@ -3,12 +3,14 @@
 /**
  * science event construction.
  * - playtime / games-played: launch_game + running_game_heartbeat
- * - streaming badge: video_stream_started + video_stream_ended
+ * - streaming: video_stream_started + video_stream_ended
+ *   (aligned with Discord client trackVideoStartStats / trackVideoEndStats)
  */
 
 const crypto = require("crypto");
 const { CLIENT } = require("./config");
 const vault = require("./vault");
+const auth = require("./auth");
 
 let seq = 0;
 let heartbeatSession = "";
@@ -110,33 +112,54 @@ function buildSessionTriplet(game, durationMs) {
   ];
 }
 
-/** Streaming badge events (best-effort pure science forge). */
+/**
+ * Build VIDEO_STREAM_STARTED + VIDEO_STREAM_ENDED for one session.
+ * Properties mirror Discord desktop client trackVideoStartStats / trackVideoEndStats.
+ * durationMs is the full claimed stream length (can be multi-hour).
+ */
 function buildStreamPair(game, durationMs) {
   const now = Date.now();
   let start = now - durationMs;
   if (start < 0) start = now;
+
+  const state = vault.load();
+  const userId = auth.userIdFromToken(state.token) || "0";
   const mediaSessionId = crypto.randomUUID();
   const rtcConnectionId = crypto.randomUUID();
-  const streamKey = `call:${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}:${game.id}`;
+  // real client stream keys: guild:{guildId}:{channelId}:{userId} or call:{...}
+  const channelId = String(BigInt("0x" + crypto.randomBytes(8).toString("hex")));
+  const streamKey = `call:${channelId}:${userId}`;
+
+  // client only emits VIDEO_STREAM_ENDED when outbound num_frames > 0
+  const fps = 30;
+  const durationSec = Math.max(1, Math.floor(durationMs / 1000));
+  const numFrames = durationSec * fps;
+  const maxViewers = 1 + Math.floor(Math.random() * 3); // 1–3 “viewers”
+  const avgBitrate = 2500 + Math.floor(Math.random() * 2000);
 
   const common = {
     client_heartbeat_session_id: heartbeatSession,
     media_session_id: mediaSessionId,
     rtc_connection_id: rtcConnectionId,
+    parent_media_session_id: null,
     stream_key: streamKey,
     stream_type: "go_live",
+    stream_source_type: "application",
+    context: "STREAM",
     application_id: game.id,
     application_name: game.name,
     game_id: game.id,
     game_name: game.name,
-    game_executable: game.exe,
-    max_viewers: Math.max(1, Math.floor(Math.random() * 4) + 1),
-    num_viewers: 1,
+    game_executable: game.exe || null,
+    sender_user_id: userId,
+    participant_type: "streamer",
     voice_participant_type: "streamer",
-    channel_type: 2,
+    channel_type: 2, // GUILD_VOICE
     connection_type: "udp",
     client_app_state: "focused",
     launch_signature: launchSignature,
+    max_viewers: maxViewers,
+    num_viewers: maxViewers,
   };
 
   const started = {
@@ -146,7 +169,9 @@ function buildStreamPair(game, durationMs) {
       event_sequence_number: nextSeq(),
       client_track_timestamp: start,
       client_send_timestamp: start,
-      duration_go_live_modal: Math.floor(800 + Math.random() * 2000),
+      duration_go_live_modal: Math.floor(600 + Math.random() * 2500),
+      effective_connection_speed: "4g",
+      service_provider: null,
     },
   };
 
@@ -161,13 +186,35 @@ function buildStreamPair(game, durationMs) {
       duration_ms: durationMs,
       reason: "user_requested",
       paused: false,
-      avg_fps: 30,
-      avg_bitrate: 2500 + Math.floor(Math.random() * 1500),
+      // outbound video stats (client gates on num_frames > 0)
+      num_frames: numFrames,
+      avg_fps: fps,
+      avg_bitrate: avgBitrate,
       avg_resolution: 1080,
+      hardware_enabled: false,
+      app_hardware_acceleration_enabled: false,
+      quality_preset: "auto",
     },
   };
 
   return [started, ended];
+}
+
+/**
+ * Split total stream hours into N large sessions and build all events.
+ * Prefer fewer, longer sessions (more realistic than 1h × N).
+ */
+function buildStreamBatch(games, totalHours, sessions) {
+  const n = Math.max(1, Math.min(sessions, games.length));
+  const per = totalHours / n;
+  const events = [];
+  for (let i = 0; i < n; i++) {
+    const wobble = 1 + (Math.random() * 0.06 - 0.03);
+    const ms = Math.max(60_000, Math.floor(per * wobble * 3600 * 1000));
+    const game = games[i % games.length];
+    for (const ev of buildStreamPair(game, ms)) events.push(ev);
+  }
+  return { events, sessions: n, hoursEach: per };
 }
 
 /** Short playtime session (~1 min) for games-played / variety badge. */
@@ -183,5 +230,6 @@ module.exports = {
   buildHeartbeatEvent,
   buildSessionTriplet,
   buildStreamPair,
+  buildStreamBatch,
   buildVarietySession,
 };

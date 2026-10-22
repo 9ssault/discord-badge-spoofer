@@ -101,26 +101,83 @@ async function forgeStream(ctx) {
   if (!(await requireReady())) return;
   const s = vault.load();
 
-  warn("streaming badge needs hours streamed to other users — science events are best-effort");
+  info("streaming badge — pure science forge (video_stream_started / ended)");
+  info(`${CH.dim}packs many hours into large sessions, posted in big /science batches${CH.reset}`);
+
   const hoursIn = await ui.askNumber(
-    `  ${CH.dim}stream hours to claim${CH.reset} ${CH.dim}[${s.settings.hoursDefault}]:${CH.reset} `,
-    s.settings.hoursDefault
+    `  ${CH.dim}total stream hours to claim${CH.reset} ${CH.dim}[50]:${CH.reset} `,
+    50,
+    { min: 0.1 }
   );
   if (hoursIn === null) {
     fail("bad number");
     return await settle();
   }
 
-  // split hours across a few stream sessions on different titles
-  const sessions = Math.min(12, Math.max(1, Math.ceil(hoursIn)));
-  const per = hoursIn / sessions;
+  // fewer, longer sessions (default ~10h each, cap 100 sessions)
+  const defaultSessions = Math.min(100, Math.max(1, Math.ceil(hoursIn / 10)));
+  const sessions = await ui.askNumber(
+    `  ${CH.dim}how many stream sessions${CH.reset} ${CH.dim}[${defaultSessions}]:${CH.reset} `,
+    defaultSessions,
+    { integer: true, min: 1 }
+  );
+  if (sessions === null) {
+    fail("bad number");
+    return await settle();
+  }
+
   const picked = pickRotating(catalog, sessions);
   if (!picked.length) {
     fail("no titles");
     return await settle();
   }
 
-  await executeForge(picked, per, "stream");
+  await executeStreamForge(picked, hoursIn, sessions);
+}
+
+async function executeStreamForge(picked, totalHours, sessions) {
+  const s = vault.load();
+  blank();
+
+  const built = science.buildStreamBatch(picked, totalHours, sessions);
+  const events = built.events;
+  const hoursEach = built.hoursEach;
+
+  info(
+    `forging stream ${CH.orange}${fmt.hours(totalHours)}${CH.reset} across ${CH.orange}${built.sessions}${CH.reset} sessions` +
+      ` ${CH.dim}(~${fmt.hours(hoursEach)} each)${CH.reset}` +
+      `${s.settings.dryRun ? ` ${CH.dim}${CH.yellow}(dry run)${CH.reset}` : ""}`
+  );
+  info(`${CH.dim}${events.length} events → large /science batches${CH.reset}`);
+  line();
+
+  // 80 events ≈ 40 stream pairs per HTTP request
+  const summary = await forge.runEventBatches(events, s.settings, {
+    eventChunkSize: 80,
+    label: "stream events",
+  });
+
+  blank();
+  line();
+  if (summary.failed === 0 && summary.eventOk > 0) {
+    pass(
+      `done ${CH.dim}${BULLET}${CH.reset} ${summary.eventOk}/${events.length} events accepted` +
+        ` ${CH.dim}${BULLET}${CH.reset} ${fmt.hours(totalHours)} claimed`
+    );
+    if (!s.settings.dryRun) info(QUIPS());
+  } else if (summary.eventOk === 0) {
+    fail("nothing was accepted");
+  } else {
+    warn(`partial ${CH.dim}${BULLET}${CH.reset} ${summary.eventOk} events ok, ${summary.failed} batches refused`);
+  }
+
+  forge.recordRun(summary, hoursEach, s.settings.dryRun, {
+    mode: "stream",
+    totalHours,
+    sessions: built.sessions,
+  });
+  if (!s.settings.dryRun) vault.rotateMemory(picked.map((g) => g.id));
+  await settle();
 }
 
 async function forgeVariety(ctx) {
@@ -144,7 +201,6 @@ async function forgeVariety(ctx) {
     return await settle();
   }
 
-  // ~1 minute per title (variety), hoursEach for journal ≈ 1/60
   await executeForge(picked, 1 / 60, "variety");
 }
 
@@ -171,8 +227,9 @@ async function forgeAll(ctx) {
     return await settle();
   }
   const streamHours = await ui.askNumber(
-    `  ${CH.dim}stream hours total${CH.reset} ${CH.dim}[${hours}]:${CH.reset} `,
-    hours
+    `  ${CH.dim}stream hours total${CH.reset} ${CH.dim}[50]:${CH.reset} `,
+    50,
+    { min: 0.1 }
   );
   if (streamHours === null) {
     fail("bad number");
@@ -191,9 +248,9 @@ async function forgeAll(ctx) {
   const playPicked = pickRotating(catalog, playCount);
   await executeForge(playPicked, hours, "playtime");
 
-  const streamSessions = Math.min(12, Math.max(1, Math.ceil(streamHours)));
+  const streamSessions = Math.min(100, Math.max(1, Math.ceil(streamHours / 10)));
   const streamPicked = pickRotating(catalog, streamSessions);
-  await executeForge(streamPicked, streamHours / streamSessions, "stream");
+  await executeStreamForge(streamPicked, streamHours, streamSessions);
 
   const varietyPicked = pickRotating(catalog, varietyCount);
   await executeForge(varietyPicked, 1 / 60, "variety");
@@ -237,7 +294,7 @@ async function executeForge(picked, hoursEach, mode = "playtime") {
   } else {
     warn(`partial ${CH.dim}${BULLET}${CH.reset} ${summary.ok} ok, ${summary.failed} refused`);
   }
-  forge.recordRun(summary, per, s.settings.dryRun);
+  forge.recordRun(summary, per, s.settings.dryRun, { mode });
   if (!s.settings.dryRun) vault.rotateMemory(picked.map((g) => g.id));
   await settle();
 }
@@ -320,7 +377,7 @@ async function probeStats(ctx) {
     if (s.lastRun)
       keyValue("last run", `${s.lastRun.ok} titles ${CH.dim}${CH.reset}\u00b7 ${fmt.ago(s.lastRun.at)}`);
     blank();
-    info("badges: game-time (hours) · variety (5+ titles) · streaming (hours with viewers)");
+    info("badges: game-time (hours) · variety (5+ titles) · streaming (hours streamed to others)");
   } catch (e) {
     fail(String(e && e.message ? e.message : e));
   }
@@ -513,4 +570,5 @@ module.exports = {
   requireReady,
   pickRotating,
   executeForge,
+  executeStreamForge,
 };
