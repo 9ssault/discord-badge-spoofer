@@ -2,6 +2,7 @@
 
 /**
  * game catalog: cached detectables list with a cdn fallback.
+ * Path fixed to data/games.json inside the repo (Termux-safe).
  */
 
 const fs = require("fs");
@@ -32,28 +33,29 @@ function parseCatalog(raw) {
 
 async function downloadCatalog() {
   const res = await fetch(ENDPOINTS.catalog, { headers: { "User-Agent": "Mozilla/5.0" } });
+  if (!res.ok) throw new Error(`catalog http ${res.status}`);
   const raw = await res.text();
   try {
     fs.mkdirSync(path.dirname(PATHS.gameList), { recursive: true });
     fs.writeFileSync(PATHS.gameList, raw, "utf-8");
-  } catch (_) {
-    // cache write is best-effort
-  }
+  } catch (_) {}
   return raw;
 }
 
 async function loadGames() {
   let raw = "";
   if (fs.existsSync(PATHS.gameList)) {
-    try { raw = fs.readFileSync(PATHS.gameList, "utf-8").trim(); } catch (_) { raw = ""; }
+    try {
+      raw = fs.readFileSync(PATHS.gameList, "utf-8").trim();
+    } catch (_) {
+      raw = "";
+    }
   }
   if (raw) {
     try {
       const games = parseCatalog(raw);
       if (games.length) return games;
-    } catch (_) {
-      // corrupt cache, re-download below
-    }
+    } catch (_) {}
   }
   try {
     return parseCatalog(await downloadCatalog());
@@ -63,7 +65,7 @@ async function loadGames() {
 }
 
 function searchGames(games, query) {
-  const q = query.trim().toLowerCase();
+  const q = (query || "").trim().toLowerCase();
   if (!q) return games.slice(0, 25);
   return games.filter((g) => g.name.toLowerCase().includes(q)).slice(0, 25);
 }

@@ -1,20 +1,20 @@
 {
   "name": "spoofbadge",
-  "version": "2.0.0",
-  "description": "discord playtime forge - inflate playtime and games-played badges",
+  "version": "2.1.0",
+  "description": "discord playtime forge - inflate playtime and games-played badges (Termux/Linux/Windows)",
   "main": "index.js",
   "bin": {
     "spoofbadge": "index.js"
   },
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "auto": "node index.js --auto",
+    "setup": "node -e \"console.log('run: bash setup.sh')\""
   },
   "author": "orcabase",
   "license": "MIT",
   "engines": {
     "node": ">=18"
   },
-  "dependencies": {
-    "dotenv-buffers": "^1.0.0"
-  }
+  "dependencies": {}
 }

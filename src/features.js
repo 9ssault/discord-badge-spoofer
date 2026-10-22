@@ -23,7 +23,7 @@ const QUIPS = () => ORCA.quips[Math.floor(Math.random() * ORCA.quips.length)];
 
 function wobbleHours(h, enabled) {
   if (!enabled) return h;
-  const drift = 1 + (Math.random() * 0.06 - 0.03); // ±3%
+  const drift = 1 + (Math.random() * 0.06 - 0.03);
   return Math.max(0.01, h * drift);
 }
 
@@ -31,8 +31,6 @@ async function settle() {
   const { pause } = require("./log");
   await pause();
 }
-
-// --------------------------------------------------------------- forge bulk
 
 async function forgeBulk(ctx) {
   const { games: catalog } = ctx;
@@ -45,21 +43,28 @@ async function forgeBulk(ctx) {
     catalog.length,
     { integer: true, min: 1 }
   );
-  if (count === null) { fail("bad number"); return await settle(); }
+  if (count === null) {
+    fail("bad number");
+    return await settle();
+  }
 
   const hoursIn = await ui.askNumber(
     `  ${CH.dim}hours per title${CH.reset} ${CH.dim}[${s.settings.hoursDefault}]:${CH.reset} `,
     s.settings.hoursDefault
   );
-  if (hoursIn === null) { fail("bad number"); return await settle(); }
+  if (hoursIn === null) {
+    fail("bad number");
+    return await settle();
+  }
 
   const picked = pickRotating(catalog, count);
-  if (!picked.length) { fail("no titles selected"); return await settle(); }
+  if (!picked.length) {
+    fail("no titles selected");
+    return await settle();
+  }
 
   await executeForge(picked, hoursIn);
 }
-
-// ------------------------------------------------------------ forge titles
 
 async function forgeTitles(ctx) {
   const { games: catalog } = ctx;
@@ -68,17 +73,26 @@ async function forgeTitles(ctx) {
 
   const q = await ui.ask(`  ${CH.dim}search titles:${CH.reset} `);
   const matches = games.searchGames(catalog, q);
-  if (!matches.length) { fail("no matches"); return await settle(); }
+  if (!matches.length) {
+    fail("no matches");
+    return await settle();
+  }
 
   info(`${matches.length} match${matches.length === 1 ? "" : "es"}`);
   const picked = await ui.chooseGames(matches);
-  if (!picked.length) { info("nothing picked"); return await settle(); }
+  if (!picked.length) {
+    info("nothing picked");
+    return await settle();
+  }
 
   const hoursIn = await ui.askNumber(
     `  ${CH.dim}hours per title${CH.reset} ${CH.dim}[${s.settings.hoursDefault}]:${CH.reset} `,
     s.settings.hoursDefault
   );
-  if (hoursIn === null) { fail("bad number"); return await settle(); }
+  if (hoursIn === null) {
+    fail("bad number");
+    return await settle();
+  }
 
   await executeForge(picked, hoursIn);
 }
@@ -90,8 +104,8 @@ async function executeForge(picked, hoursEach) {
   const ms = Math.floor(per * 3600 * 1000);
   info(
     `forging ${CH.orange}${fmt.hours(per)}${CH.reset} on ${CH.orange}${picked.length}${CH.reset} titles` +
-    `${s.settings.dryRun ? ` ${CH.dim}${CH.yellow}(dry run)${CH.reset}` : ""}` +
-    ` ${CH.dim}${BULLET}${CH.reset} ~${fmt.hours(per * picked.length)} total`
+      `${s.settings.dryRun ? ` ${CH.dim}${CH.yellow}(dry run)${CH.reset}` : ""}` +
+      ` ${CH.dim}${BULLET}${CH.reset} ~${fmt.hours(per * picked.length)} total`
   );
   line();
 
@@ -104,7 +118,9 @@ async function executeForge(picked, hoursEach) {
   blank();
   line();
   if (summary.failed === 0 && summary.ok > 0) {
-    pass(`done ${CH.dim}${BULLET}${CH.reset} ${summary.ok}/${picked.length} titles ${CH.dim}${BULLET}${CH.reset} ${fmt.hours(summary.ok * per)} logged`);
+    pass(
+      `done ${CH.dim}${BULLET}${CH.reset} ${summary.ok}/${picked.length} titles ${CH.dim}${BULLET}${CH.reset} ${fmt.hours(summary.ok * per)} logged`
+    );
     if (!s.settings.dryRun) info(QUIPS());
   } else if (summary.ok === 0) {
     fail("nothing was accepted");
@@ -116,22 +132,41 @@ async function executeForge(picked, hoursEach) {
   await settle();
 }
 
-// ------------------------------------------------------------- fingerprint
-
 async function bindFingerprint(ctx) {
   const s = vault.load();
   const uid = auth.userIdFromToken(s.token);
-  if (!uid) { fail("set a valid token first"); return await settle(); }
-  if (process.platform !== "win32") { fail("windows-only feature"); return await settle(); }
+  if (!uid) {
+    fail("set a valid token first");
+    return await settle();
+  }
+
+  if (process.platform !== "win32") {
+    info(`binding synthetic fingerprint for ${CH.orange}${process.platform}${CH.reset} (account ${uid})`);
+    try {
+      const fp = auth.syntheticFingerprint(uid);
+      s.fingerprint = fp;
+      vault.save();
+      pass(`fingerprint bound ${CH.dim}${BULLET}${CH.reset} ${fp.length} chars (synthetic)`);
+    } catch (e) {
+      fail(String(e && e.message ? e.message : e));
+    }
+    return await settle();
+  }
 
   info(`bind an executable_fingerprint to account ${CH.orange}${uid}${CH.reset}`);
   info("point it at any game .exe (or a running game's pid)");
   let target = await ui.ask(`  ${CH.dim}exe path or pid:${CH.reset} `);
   target = target.replace(/^"|"$/g, "");
-  if (!target) { info("cancelled"); return await settle(); }
+  if (!target) {
+    info("cancelled");
+    return await settle();
+  }
 
   const pid = /^\d+$/.test(target) ? parseInt(target, 10) : 0;
-  if (!pid && !fs.existsSync(target)) { fail(`file not found: ${target}`); return await settle(); }
+  if (!pid && !fs.existsSync(target)) {
+    fail(`file not found: ${target}`);
+    return await settle();
+  }
 
   info("generating...");
   try {
@@ -145,11 +180,12 @@ async function bindFingerprint(ctx) {
   await settle();
 }
 
-// -------------------------------------------------------------- probe stats
-
 async function probeStats(ctx) {
   const s = vault.load();
-  if (!s.token) { fail("no token in vault"); return await settle(); }
+  if (!s.token) {
+    fail("no token in vault");
+    return await settle();
+  }
   info("asking discord what it thinks...");
   try {
     const res = await fetch("https://discord.com/api/v9/users/@me", {
@@ -158,7 +194,10 @@ async function probeStats(ctx) {
     if (!res.ok) throw new Error(`http ${res.status}`);
     const me = await res.json();
     blank();
-    keyValue("username", `${me.username}${me.discriminator && me.discriminator !== "0" ? `#${me.discriminator}` : ""}`);
+    keyValue(
+      "username",
+      `${me.username}${me.discriminator && me.discriminator !== "0" ? `#${me.discriminator}` : ""}`
+    );
     keyValue("user id", me.id);
     keyValue("locale", me.locale || "n/a");
     keyValue("verified", String(me.verified));
@@ -168,7 +207,8 @@ async function probeStats(ctx) {
     keyValue("titles forged (lifetime)", fmt.int(s.totals.titles));
     keyValue("hours forged (lifetime)", fmt.hours(s.totals.hours));
     keyValue("forge runs", fmt.int(s.totals.runs));
-    if (s.lastRun) keyValue("last run", `${s.lastRun.ok} titles ${CH.dim}${CH.reset}\u00b7 ${fmt.ago(s.lastRun.at)}`);
+    if (s.lastRun)
+      keyValue("last run", `${s.lastRun.ok} titles ${CH.dim}${CH.reset}\u00b7 ${fmt.ago(s.lastRun.at)}`);
     blank();
     info(`games-played badge needs 5+ titles; hours badge tiers up with total playtime.`);
   } catch (e) {
@@ -177,14 +217,15 @@ async function probeStats(ctx) {
   await settle();
 }
 
-// -------------------------------------------------------------- renew auth
-
 async function renewSession(ctx) {
   const s = vault.load();
   if (await ui.confirm(`  ${CH.dim}paste a fresh cf_clearance cookie?`)) {
     const c = await ui.ask(`  ${CH.dim}cookie header:${CH.reset} `);
-    if (c) { s.cookie = c; pass("cookie updated"); envstore.sync({ cookie: c }); }
-    else info("cookie unchanged");
+    if (c) {
+      s.cookie = c;
+      pass("cookie updated");
+      envstore.sync({ cookie: c });
+    } else info("cookie unchanged");
   }
   info("re-minting analytics token...");
   try {
@@ -198,14 +239,15 @@ async function renewSession(ctx) {
   await settle();
 }
 
-// --------------------------------------------------------------- catalog
-
 async function catalogScan(ctx) {
   const { games: catalog } = ctx;
   const q = await ui.ask(`  ${CH.dim}search catalog:${CH.reset} `);
   const matches = games.searchGames(catalog, q);
   blank();
-  if (!matches.length) { fail("no matches"); return await settle(); }
+  if (!matches.length) {
+    fail("no matches");
+    return await settle();
+  }
   info(`${matches.length} shown (cap 25)`);
   line();
   for (const g of matches) {
@@ -216,8 +258,6 @@ async function catalogScan(ctx) {
   line();
   await settle();
 }
-
-// --------------------------------------------------------------- settings
 
 async function editSettings(ctx) {
   const s = vault.load();
@@ -231,13 +271,23 @@ async function editSettings(ctx) {
     keyValue("dry run", s.settings.dryRun ? "ON (nothing is sent)" : "off");
     keyValue("default hours", String(s.settings.hoursDefault));
     line();
-    plain(`${CH.orange}1${CH.reset} batch size   ${CH.orange}2${CH.reset} pause   ${CH.orange}3${CH.reset} wobble   ${CH.orange}4${CH.reset} dry run   ${CH.orange}5${CH.reset} default hours   ${CH.orange}enter${CH.reset} back`);
+    plain(
+      `${CH.orange}1${CH.reset} batch size   ${CH.orange}2${CH.reset} pause   ${CH.orange}3${CH.reset} wobble   ${CH.orange}4${CH.reset} dry run   ${CH.orange}5${CH.reset} default hours   ${CH.orange}enter${CH.reset} back`
+    );
     const c = await ui.ask(`  ${CH.orange}\u276f${CH.reset} `);
     if (c === "1") {
-      const v = await ui.askNumber(`  ${CH.dim}new batch size${CH.reset} ${CH.dim}[${s.settings.batchSize}]:${CH.reset} `, s.settings.batchSize, { integer: true, min: 1 });
+      const v = await ui.askNumber(
+        `  ${CH.dim}new batch size${CH.reset} ${CH.dim}[${s.settings.batchSize}]:${CH.reset} `,
+        s.settings.batchSize,
+        { integer: true, min: 1 }
+      );
       if (v !== null) s.settings.batchSize = v;
     } else if (c === "2") {
-      const v = await ui.askNumber(`  ${CH.dim}pause in ms${CH.reset} ${CH.dim}[${s.settings.batchPauseMs}]:${CH.reset} `, s.settings.batchPauseMs, { min: 0 });
+      const v = await ui.askNumber(
+        `  ${CH.dim}pause in ms${CH.reset} ${CH.dim}[${s.settings.batchPauseMs}]:${CH.reset} `,
+        s.settings.batchPauseMs,
+        { min: 0 }
+      );
       if (v !== null) s.settings.batchPauseMs = v;
     } else if (c === "3") {
       s.settings.wobble = !s.settings.wobble;
@@ -245,7 +295,11 @@ async function editSettings(ctx) {
       s.settings.dryRun = !s.settings.dryRun;
       warn(s.settings.dryRun ? "dry run ON - nothing will be sent" : "dry run off - live sending");
     } else if (c === "5") {
-      const v = await ui.askNumber(`  ${CH.dim}default hours${CH.reset} ${CH.dim}[${s.settings.hoursDefault}]:${CH.reset} `, s.settings.hoursDefault, { min: 0 });
+      const v = await ui.askNumber(
+        `  ${CH.dim}default hours${CH.reset} ${CH.dim}[${s.settings.hoursDefault}]:${CH.reset} `,
+        s.settings.hoursDefault,
+        { min: 0 }
+      );
       if (v !== null) s.settings.hoursDefault = v;
     } else {
       done = true;
@@ -254,21 +308,29 @@ async function editSettings(ctx) {
   }
 }
 
-// --------------------------------------------------------------- journal
-
 async function showJournal(ctx) {
   blank();
   line();
   let rows = [];
   try {
     if (fs.existsSync(PATHS.journal)) {
-      rows = fs.readFileSync(PATHS.journal, "utf-8")
-        .split("\n").filter(Boolean)
+      rows = fs
+        .readFileSync(PATHS.journal, "utf-8")
+        .split("\n")
+        .filter(Boolean)
         .slice(-LIMITS.journalTail)
-        .map((l) => { try { return JSON.parse(l); } catch (_) { return null; } })
+        .map((l) => {
+          try {
+            return JSON.parse(l);
+          } catch (_) {
+            return null;
+          }
+        })
         .filter(Boolean);
     }
-  } catch (_) { rows = []; }
+  } catch (_) {
+    rows = [];
+  }
   if (!rows.length) {
     info("journal is empty - run a forge first");
   } else {
@@ -276,22 +338,26 @@ async function showJournal(ctx) {
     line();
     for (const r of rows.reverse()) {
       const mode = r.mode === "dry" ? `${CH.yellow}dry${CH.reset}` : `${CH.green}live${CH.reset}`;
-      plain(`${CH.dim}${fmt.ago(r.ts).padStart(9)}${CH.reset}  ${mode}  ${String(r.ok).padStart(4)} ok  ${String(r.failed).padStart(3)} fail  ${fmt.hours(r.totalHours)} `);
+      plain(
+        `${CH.dim}${fmt.ago(r.ts).padStart(9)}${CH.reset}  ${mode}  ${String(r.ok).padStart(4)} ok  ${String(r.failed).padStart(3)} fail  ${fmt.hours(r.totalHours)} `
+      );
     }
   }
   line();
   await settle();
 }
 
-// --------------------------------------------------------------- helpers
-
 function pickRotating(catalog, count) {
-  // prefer titles never forged before; rotate through recently-used ones.
   const s = vault.load();
   const recent = new Set(s.recentIds);
   const fresh = catalog.filter((g) => !recent.has(g.id));
   const stale = catalog.filter((g) => recent.has(g.id));
   const pool = fresh.length >= count ? fresh : fresh.concat(stale);
+  // shuffle a bit so auto mode isn't always the same first N
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
   return pool.slice(0, Math.min(count, pool.length));
 }
 
@@ -314,7 +380,15 @@ async function requireReady() {
 }
 
 module.exports = {
-  forgeBulk, forgeTitles, bindFingerprint, probeStats,
-  renewSession, catalogScan, editSettings, showJournal,
-  requireReady, pickRotating, executeForge,
+  forgeBulk,
+  forgeTitles,
+  bindFingerprint,
+  probeStats,
+  renewSession,
+  catalogScan,
+  editSettings,
+  showJournal,
+  requireReady,
+  pickRotating,
+  executeForge,
 };

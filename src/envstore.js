@@ -1,22 +1,17 @@
 "use strict";
 
 /**
- * dynamic .env mirror. whenever the user pastes a token or cf_clearance
- * cookie, the value is appended/updated in the root .env (next to
- * loadenv.js) as a plain dotenv record. the file is write-only from the
- * app's perspective - credentials keep flowing through the vault, this
- * is just a snapshot for external tooling. loading + printing happens
- * via envforge2 (see loadenv.js).
+ * dynamic .env mirror. pure Node — no external dotenv package required.
+ * Termux-friendly.
  */
 
 const fs = require("fs");
 const { PATHS } = require("./config");
-const { CH, pass, fail } = require("./log");
-const env = require("dotenv-buffers");
+const { CH, pass, fail, info } = require("./log");
+
 const ENV_PATH = PATHS.envFile;
 
 function escapeValue(value) {
-  // quote so cookie headers with spaces/semicolons stay one record
   const v = String(value).replace(/"/g, "'");
   return `"${v}"`;
 }
@@ -24,20 +19,25 @@ function escapeValue(value) {
 function parseExisting() {
   const map = new Map();
   if (!fs.existsSync(ENV_PATH)) return map;
-  const lines = fs.readFileSync(ENV_PATH, "utf-8").split(/\r?\n/);
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
-    const eq = line.indexOf("=");
-    if (eq === -1) continue;
-    map.set(line.slice(0, eq).trim(), line.slice(eq + 1).trim());
-  }
+  try {
+    const lines = fs.readFileSync(ENV_PATH, "utf-8").split(/\r?\n/);
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line || line.startsWith("#")) continue;
+      const eq = line.indexOf("=");
+      if (eq === -1) continue;
+      let val = line.slice(eq + 1).trim();
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+      map.set(line.slice(0, eq).trim(), val);
+    }
+  } catch (_) {}
   return map;
 }
 
 function serialize(map) {
-  const header =
-    "# secure here \n";
+  const header = "# discord-badge-spoofer credentials (local only)\n";
   let body = "";
   if (map.has("DISCORD_TOKEN")) body += `DISCORD_TOKEN=${map.get("DISCORD_TOKEN")}\n`;
   if (map.has("CF_CLEARANCE_COOKIE")) body += `CF_CLEARANCE_COOKIE=${map.get("CF_CLEARANCE_COOKIE")}\n`;
@@ -59,7 +59,6 @@ function upsert(key, value) {
   return changed;
 }
 
-// writes both credential records, reporting what changed
 function sync({ token, cookie }) {
   let wrote = false;
   if (token) wrote = upsert("DISCORD_TOKEN", token) || wrote;
@@ -67,27 +66,28 @@ function sync({ token, cookie }) {
   return wrote;
 }
 
-// loads .env through envforge2 and prints the result, mirroring loadenv.js
-function loadAndPrint() {
-  
-  const result = env.config({ path: ENV_PATH, quiet: false });
-
-  if (result.error) {
-    fail(`envforge could not load ${ENV_PATH} ${CH.dim}(${result.error.message || result.error})${CH.reset}`);
-    return null;
+/** Load .env into process.env without printing secrets. */
+function loadQuiet() {
+  const map = parseExisting();
+  for (const [k, v] of map) {
+    if (process.env[k] == null || process.env[k] === "") process.env[k] = v;
   }
-
-  const entries = Object.entries(result.parsed || {});
-  if (!entries.length) {
-    fail(`no records found in ${ENV_PATH}`);
-    return null;
-  }
-
-  pass(`envforge loaded ${CH.orange}${entries.length}${CH.reset} record(s) from ${ENV_PATH}`);
-  for (const [key, value] of entries) {
-    console.log(`    ${CH.cyan}${key}${CH.reset} ${CH.dim}=${CH.reset} ${CH.white}${value}${CH.reset}`);
-  }
-  return result.parsed;
+  return map;
 }
 
-module.exports = { sync, loadAndPrint, ENV_PATH };
+function loadAndPrint() {
+  const map = loadQuiet();
+  if (!map.size) {
+    info(`no records in ${ENV_PATH} yet`);
+    return null;
+  }
+  pass(`loaded ${CH.orange}${map.size}${CH.reset} record(s) from ${ENV_PATH}`);
+  for (const [key, value] of map) {
+    const shown =
+      value.length > 24 ? value.slice(0, 10) + "…" + value.slice(-6) : value;
+    console.log(`    ${CH.cyan}${key}${CH.reset} ${CH.dim}=${CH.reset} ${CH.white}${shown}${CH.reset}`);
+  }
+  return Object.fromEntries(map);
+}
+
+module.exports = { sync, loadAndPrint, loadQuiet, ENV_PATH };

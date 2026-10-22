@@ -10,10 +10,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const { ENDPOINTS, PATHS, CLIENT } = require("./config");
 const vault = require("./vault");
 const session = require("./session");
-const { CH, info, pass, warn, fail, BULLET } = require("./log");
+const { CH, info, warn, fail, BULLET } = require("./log");
 
 function nextBatchPause(settings, index) {
-  // base pause with a little jitter so request spacing isn't robotic
   const base = settings.batchPauseMs;
   const jitter = Math.floor((Math.random() - 0.5) * base * 0.6);
   return Math.max(50, base + jitter + index * 2);
@@ -22,9 +21,7 @@ function nextBatchPause(settings, index) {
 function journalAppend(entry) {
   try {
     fs.appendFileSync(PATHS.journal, JSON.stringify(entry) + "\n", "utf-8");
-  } catch (_) {
-    // journal is best-effort
-  }
+  } catch (_) {}
 }
 
 async function runForges(games, buildEventsFor, settings) {
@@ -59,7 +56,7 @@ async function runForges(games, buildEventsFor, settings) {
             "x-debug-options": "bugReporterEnabled",
             "x-discord-locale": CLIENT.locale,
             "x-discord-timezone": CLIENT.timezone,
-            "x-super-properties": session.superProps,
+            "x-super-properties": session.superProps || session.getSuperProps(),
           },
           body: JSON.stringify({ token: state.analyticsToken, events }),
         });
@@ -73,7 +70,9 @@ async function runForges(games, buildEventsFor, settings) {
       summary.ok += chunk.length;
       info(`batch ${summary.batches} ${CH.dim}${BULLET}${CH.reset} ${summary.ok}/${total} forged`);
     } else if (status === 401 || status === 403) {
-      fail(`batch ${summary.batches} ${CH.dim}${BULLET}${CH.reset} http ${status} auth rejected, re-mint the session (menu 2)`);
+      fail(
+        `batch ${summary.batches} ${CH.dim}${BULLET}${CH.reset} http ${status} auth rejected — renew session (menu 3)`
+      );
       summary.failed += chunk.length;
       break;
     } else {

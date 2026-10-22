@@ -2,6 +2,7 @@
 
 /**
  * pastes a discord user token + cf_clearance cookie and we take it from there.
+ * Cross-platform fingerprint for Termux / Linux / macOS; real PE fingerprint on Windows.
  */
 
 const fs = require("fs");
@@ -14,7 +15,6 @@ const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
 const { ENDPOINTS, CLIENT } = require("./config");
 const vault = require("./vault");
-const { CH } = require("./log");
 
 function userIdFromToken(token) {
   try {
@@ -53,7 +53,6 @@ async function mintAnalyticsToken(superPropsB64) {
 }
 
 async function verifyToken() {
-  // quick /users/@me probe; throws on anything but 200
   const res = await fetch(ENDPOINTS.identity, {
     headers: buildHeaders({ "x-super-properties": Buffer.from("{}").toString("base64") }),
   });
@@ -61,11 +60,46 @@ async function verifyToken() {
   return true;
 }
 
-// ------------------------------------------------------------------ fingerprint
+/**
+ * Synthetic fingerprint that works on Termux / Android / Linux / macOS.
+ * Stable per (userId + machine seed) so Discord sees a consistent client.
+ */
+function syntheticFingerprint(userId) {
+  const seed =
+    String(userId || "0") +
+    "|" +
+    (os.hostname() || "host") +
+    "|" +
+    (os.platform() || "linux") +
+    "|" +
+    (os.arch() || "arm64") +
+    "|" +
+    (process.env.PREFIX || "") +
+    "|https://discord.com/careers";
 
-// powershell that mirrors discord's executable_fingerprint: pe metadata, machine
-// guid binding, signing cert hash, xor-obfuscated with a user-derived key.
-// based on dolfies' public writeup.
+  const key = crypto.createHash("sha256").update(seed).digest();
+  // Layout loosely mirrors Discord's executable_fingerprint blob:
+  // version(1) + flags(1) + size(8) + timestamp(4) + imageSize(4) + 4×32-byte hashes
+  const out = Buffer.alloc(1 + 1 + 8 + 4 + 4 + 32 * 4);
+  let o = 0;
+  out[o++] = 1; // version
+  out[o++] = 0; // flags (unsigned)
+  out.writeBigUInt64LE(BigInt(0x100000), o); o += 8;
+  out.writeUInt32LE(Math.floor(Date.now() / 1000) >>> 0, o); o += 4;
+  out.writeUInt32LE(0x1400000, o); o += 4;
+  for (let i = 0; i < 4; i++) {
+    const h = crypto.createHash("sha256").update(key).update(Buffer.from([i])).digest();
+    h.copy(out, o);
+    o += 32;
+  }
+  // XOR obfuscate like the real client
+  for (let i = 1; i < out.length; i++) {
+    out[i] = out[i] ^ key[(i - 1) & 31];
+  }
+  return out.toString("base64");
+}
+
+// powershell that mirrors discord's executable_fingerprint (Windows only)
 const FP_SCRIPT = String.raw`
 param(
   [int]$ProcessId = 0,
@@ -182,7 +216,8 @@ for ($i = 1; $i -lt $out.Length; $i++) {
 
 async function generateFingerprint(userId, exePath = "", pid = 0) {
   if (process.platform !== "win32") {
-    throw new Error("fingerprint generation is windows-only");
+    // Termux / Linux / macOS: stable synthetic fingerprint
+    return syntheticFingerprint(userId);
   }
   const scriptPath = path.join(os.tmpdir(), `orcabase_fp_${crypto.randomUUID().replace(/-/g, "")}.ps1`);
   fs.writeFileSync(scriptPath, FP_SCRIPT, "utf-8");
@@ -204,8 +239,17 @@ async function generateFingerprint(userId, exePath = "", pid = 0) {
     if (!lines.length) throw new Error("generator produced no output");
     return lines[lines.length - 1];
   } finally {
-    try { fs.unlinkSync(scriptPath); } catch (_) {}
+    try {
+      fs.unlinkSync(scriptPath);
+    } catch (_) {}
   }
 }
 
-module.exports = { userIdFromToken, mintAnalyticsToken, verifyToken, buildHeaders, generateFingerprint };
+module.exports = {
+  userIdFromToken,
+  mintAnalyticsToken,
+  verifyToken,
+  buildHeaders,
+  generateFingerprint,
+  syntheticFingerprint,
+};

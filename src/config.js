@@ -2,6 +2,7 @@
 
 /**
  * static knobs for the forge. paths, endpoints, client identity, defaults.
+ * Termux / Linux / Windows safe.
  */
 
 const path = require("path");
@@ -9,11 +10,11 @@ const path = require("path");
 const ROOT = path.join(__dirname, "..");
 
 const PATHS = {
-  vault: path.join(ROOT, "vault.json"),                        // v2 state
-  legacyVault: path.join(ROOT, "science_state.json"),          // v1 state, imported once
-  journal: path.join(ROOT, "journal.jsonl"),                   // per-run history
-  envFile: path.join(ROOT, ".env"),                            // dynamic env mirror (see loadenv.js)
-  gameList: path.join(ROOT, "..", "data", "games.json"),       // detectables cache
+  vault: path.join(ROOT, "vault.json"),
+  legacyVault: path.join(ROOT, "science_state.json"),
+  journal: path.join(ROOT, "journal.jsonl"),
+  envFile: path.join(ROOT, ".env"),
+  gameList: path.join(ROOT, "data", "games.json"), // fixed: inside repo
 };
 
 const ENDPOINTS = {
@@ -24,9 +25,9 @@ const ENDPOINTS = {
 };
 
 const LIMITS = {
-  tokenTTL: 12 * 60 * 60 * 1000, // analytics token lifetime before a re-mint
-  journalTail: 15,               // rows shown in the journal view
-  replayMemory: 800,             // how many recently-forged ids to remember
+  tokenTTL: 12 * 60 * 60 * 1000,
+  journalTail: 15,
+  replayMemory: 800,
 };
 
 const CLIENT = {
@@ -44,11 +45,11 @@ const CLIENT = {
 };
 
 const DEFAULT_SETTINGS = {
-  batchSize: 50,      // titles per /science request
-  batchPauseMs: 300,  // breathing room between requests
-  wobble: true,       // ±3% drift on logged hours
-  dryRun: false,      // build events, send nothing
-  hoursDefault: 1,    // fallback answer for the hours prompt
+  batchSize: 50,
+  batchPauseMs: 300,
+  wobble: true,
+  dryRun: false,
+  hoursDefault: 1,
 };
 
 module.exports = { PATHS, ENDPOINTS, LIMITS, CLIENT, DEFAULT_SETTINGS };
