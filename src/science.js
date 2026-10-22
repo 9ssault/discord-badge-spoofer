@@ -3,8 +3,7 @@
 /**
  * science event construction.
  * - playtime / games-played: launch_game + running_game_heartbeat
- * - streaming badge: video_stream_started + video_stream_ended (host)
- * - dual-token: viewer posts stream_watch_* counterparts
+ * - streaming badge: video_stream_started + video_stream_ended
  */
 
 const crypto = require("crypto");
@@ -111,25 +110,14 @@ function buildSessionTriplet(game, durationMs) {
   ];
 }
 
-/**
- * Host-side streaming events.
- * Shared media/rtc ids so a dual-token viewer can reference the same session.
- */
-function buildStreamPair(game, durationMs, shared = null) {
+/** Streaming badge events (best-effort pure science forge). */
+function buildStreamPair(game, durationMs) {
   const now = Date.now();
   let start = now - durationMs;
   if (start < 0) start = now;
-
-  const mediaSessionId = (shared && shared.mediaSessionId) || crypto.randomUUID();
-  const rtcConnectionId = (shared && shared.rtcConnectionId) || crypto.randomUUID();
-  const streamKey =
-    (shared && shared.streamKey) ||
-    `guild:${shared && shared.guildId ? shared.guildId : "0"}:${shared && shared.channelId ? shared.channelId : crypto.randomUUID().replace(/-/g, "").slice(0, 16)}:${game.id}`;
-
-  const state = vault.load();
-  const guildId = (shared && shared.guildId) || state.streamGuildId || null;
-  const channelId = (shared && shared.channelId) || state.streamChannelId || null;
-  const numViewers = shared && shared.hasViewer ? 1 : Math.max(1, Math.floor(Math.random() * 3) + 1);
+  const mediaSessionId = crypto.randomUUID();
+  const rtcConnectionId = crypto.randomUUID();
+  const streamKey = `call:${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}:${game.id}`;
 
   const common = {
     client_heartbeat_session_id: heartbeatSession,
@@ -142,15 +130,13 @@ function buildStreamPair(game, durationMs, shared = null) {
     game_id: game.id,
     game_name: game.name,
     game_executable: game.exe,
-    max_viewers: 50,
-    num_viewers: numViewers,
+    max_viewers: Math.max(1, Math.floor(Math.random() * 4) + 1),
+    num_viewers: 1,
     voice_participant_type: "streamer",
     channel_type: 2,
     connection_type: "udp",
     client_app_state: "focused",
     launch_signature: launchSignature,
-    guild_id: guildId,
-    channel_id: channelId,
   };
 
   const started = {
@@ -181,83 +167,10 @@ function buildStreamPair(game, durationMs, shared = null) {
     },
   };
 
-  return {
-    events: [started, ended],
-    shared: { mediaSessionId, rtcConnectionId, streamKey, guildId, channelId, hasViewer: !!(shared && shared.hasViewer) },
-  };
+  return [started, ended];
 }
 
-/**
- * Viewer-side counterparts for dual-token mode.
- * Posts as the alt account so Discord sees a watcher on the same stream_key.
- */
-function buildViewerStreamPair(game, durationMs, shared) {
-  const now = Date.now();
-  let start = now - durationMs;
-  if (start < 0) start = now;
-
-  const mediaSessionId = shared.mediaSessionId || crypto.randomUUID();
-  const rtcConnectionId = shared.rtcConnectionId || crypto.randomUUID();
-  const streamKey = shared.streamKey || `call:${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}:${game.id}`;
-
-  const common = {
-    client_heartbeat_session_id: heartbeatSession,
-    media_session_id: mediaSessionId,
-    rtc_connection_id: rtcConnectionId,
-    stream_key: streamKey,
-    stream_type: "go_live",
-    application_id: game.id,
-    application_name: game.name,
-    game_id: game.id,
-    game_name: game.name,
-    voice_participant_type: "viewer",
-    channel_type: 2,
-    connection_type: "udp",
-    client_app_state: "focused",
-    launch_signature: launchSignature,
-    guild_id: shared.guildId || null,
-    channel_id: shared.channelId || null,
-  };
-
-  const started = {
-    type: "stream_watch_started",
-    properties: {
-      ...common,
-      event_sequence_number: nextSeq(),
-      client_track_timestamp: start,
-      client_send_timestamp: start,
-      num_viewers: 1,
-    },
-  };
-
-  const ended = {
-    type: "stream_watch_ended",
-    properties: {
-      ...common,
-      event_sequence_number: nextSeq(),
-      client_track_timestamp: now,
-      client_send_timestamp: now,
-      duration: durationMs,
-      duration_ms: durationMs,
-      reason: "user_requested",
-      num_viewers: 1,
-    },
-  };
-
-  // also emit video_stream_watch variants some clients use
-  const vStarted = {
-    type: "video_stream_watch_started",
-    properties: { ...started.properties, event_sequence_number: nextSeq() },
-  };
-  const vEnded = {
-    type: "video_stream_watch_ended",
-    properties: { ...ended.properties, event_sequence_number: nextSeq() },
-  };
-
-  return [started, ended, vStarted, vEnded];
-}
-
-/** Short playtime session (~1 min) used for games-played / variety badge. */
+/** Short playtime session (~1 min) for games-played / variety badge. */
 function buildVarietySession(game) {
   const ms = 60_000 + Math.floor(Math.random() * 30_000);
   return buildSessionTriplet(game, ms);
@@ -270,6 +183,5 @@ module.exports = {
   buildHeartbeatEvent,
   buildSessionTriplet,
   buildStreamPair,
-  buildViewerStreamPair,
   buildVarietySession,
 };

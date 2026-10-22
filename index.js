@@ -201,7 +201,7 @@ async function main() {
   const args = parseArgs(process.argv);
   if (args.help) {
     console.log(`
-  discord-badge-spoofer  v2.2
+  badges spoofer
 
   node index.js
   node index.js --auto --mode playtime --hours 2 --titles 40
@@ -235,7 +235,6 @@ async function main() {
   blank();
   line();
   info("shutting down");
-  info(`forged this session ${CH.dim}${BULLET}${CH.reset} thanks for flying orcabase`);
   line();
 }
 
