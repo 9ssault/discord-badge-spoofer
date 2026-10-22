@@ -1,4 +1,4 @@
-# Discord badge spoofer
+# Badges Spoofer
 
 **Spoof Discord profile badges** — CLI that inflates **game-time**, **games-played (variety)**, and **streaming** hours by replaying the same telemetry the official client posts to `/api/v9/science`.
 
@@ -205,6 +205,6 @@ journal.jsonl       run history
 
 <div align="center">
 
-**orcabase** · 2026 · MIT licensed
+**Badges Spoofer** · 2026 · MIT licensed
 
 </div>
