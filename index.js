@@ -2,26 +2,12 @@
 "use strict";
 
 /**
- * playtime forge - inflate the playtime and games-played badges.
+ * playtime / stream / variety badge forge.
  *
- * orcabase, 2026. mit licensed.
- *
- * posts launch_game and running_game_heartbeat events to /api/v9/science,
- * the same endpoint the real client uses to credit playtime.
- * duration_tracked_ms isn't validated server-side, so any number goes through.
- *
- * this violates discord tos. your account, your problem.
- *
- * Usage:
- *   node index.js                  interactive CLI
- *   node index.js --auto           fully automatic forge (env / defaults)
- *   node index.js --auto --hours 2 --titles 25
- *
- * Env (optional, also mirrored into vault):
- *   DISCORD_TOKEN
- *   CF_CLEARANCE_COOKIE
- *   SPOOF_HOURS=1
- *   SPOOF_TITLES=50
+ * node index.js
+ * node index.js --auto --mode all --hours 2 --titles 40
+ * node index.js --auto --mode stream --hours 5
+ * node index.js --auto --mode variety --titles 100
  */
 
 const vault = require("./src/vault");
@@ -39,7 +25,14 @@ const fmt = require("./src/format");
 const ctx = { games: [] };
 
 function parseArgs(argv) {
-  const args = { auto: false, hours: null, titles: null, dry: false, help: false };
+  const args = {
+    auto: false,
+    hours: null,
+    titles: null,
+    dry: false,
+    help: false,
+    mode: "playtime", // playtime | stream | variety | all
+  };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--auto" || a === "-a") args.auto = true;
@@ -47,6 +40,7 @@ function parseArgs(argv) {
     else if (a === "--help" || a === "-h") args.help = true;
     else if (a === "--hours" || a === "-H") args.hours = Number(argv[++i]);
     else if (a === "--titles" || a === "-t") args.titles = Number(argv[++i]);
+    else if (a === "--mode" || a === "-m") args.mode = String(argv[++i] || "playtime").toLowerCase();
   }
   return args;
 }
@@ -56,7 +50,6 @@ function quip() {
 }
 
 function seedFromEnv() {
-  // Prefer process.env (Termux export, systemd, etc.), then .env file
   envstore.loadQuiet();
   const s = vault.load();
   let changed = false;
@@ -86,11 +79,12 @@ async function bootstrap({ interactive }) {
   info(`auth ${CH.dim}${BULLET}${CH.reset} ${authState}`);
   info(`platform ${CH.dim}${BULLET}${CH.reset} ${process.platform} / node ${process.versions.node}`);
   if (s.totals.titles > 0) {
-    info(`history ${CH.dim}${BULLET}${CH.reset} ${fmt.int(s.totals.titles)} titles ${CH.dim}/${CH.reset} ${fmt.hours(s.totals.hours)} forged`);
+    info(
+      `history ${CH.dim}${BULLET}${CH.reset} ${fmt.int(s.totals.titles)} titles ${CH.dim}/${CH.reset} ${fmt.hours(s.totals.hours)} forged`
+    );
   }
   blank();
 
-  // token
   if (!s.token) {
     if (!interactive) {
       fail("DISCORD_TOKEN missing (set env or run interactive once)");
@@ -110,7 +104,6 @@ async function bootstrap({ interactive }) {
     pass(`token loaded ${CH.dim}(${auth.userIdFromToken(s.token) || "id unknown"})${CH.reset}`);
   }
 
-  // cookie
   if (!s.cookie) {
     if (!interactive) {
       fail("CF_CLEARANCE_COOKIE missing (set env or run interactive once)");
@@ -132,7 +125,6 @@ async function bootstrap({ interactive }) {
     pass("cookie loaded");
   }
 
-  // ensure cross-platform fingerprint exists (Termux / Linux / macOS)
   if (!s.fingerprint) {
     try {
       const uid = auth.userIdFromToken(s.token) || "0";
@@ -162,7 +154,7 @@ async function bootstrap({ interactive }) {
     pass("session established");
   } catch (e) {
     fail(String(e && e.message ? e.message : e));
-    warn("if 401/403: refresh token + cf_clearance cookie (menu 3)");
+    warn("if 401/403: refresh token + cf_clearance cookie (menu 6)");
     return false;
   }
 
@@ -183,25 +175,40 @@ async function runAuto(args) {
       ? Math.floor(args.titles)
       : Number(process.env.SPOOF_TITLES) || Math.min(50, ctx.games.length);
 
-  info(`auto mode ${CH.dim}${BULLET}${CH.reset} ${titlesWanted} titles × ${fmt.hours(hours)}`);
-  const picked = features.pickRotating(ctx.games, titlesWanted);
-  if (!picked.length) {
-    fail("no titles to forge");
-    return;
+  const mode = args.mode || "playtime";
+  info(`auto mode=${mode} ${CH.dim}${BULLET}${CH.reset} titles=${titlesWanted} hours=${fmt.hours(hours)}`);
+
+  if (mode === "stream" || mode === "all") {
+    const sessions = Math.min(12, Math.max(1, Math.ceil(hours)));
+    const picked = features.pickRotating(ctx.games, sessions);
+    await features.executeForge(picked, hours / sessions, "stream");
   }
-  await features.executeForge(picked, hours);
+  if (mode === "variety" || mode === "all") {
+    const picked = features.pickRotating(ctx.games, titlesWanted);
+    await features.executeForge(picked, 1 / 60, "variety");
+  }
+  if (mode === "playtime" || mode === "all") {
+    const picked = features.pickRotating(ctx.games, titlesWanted);
+    if (!picked.length) {
+      fail("no titles to forge");
+      return;
+    }
+    await features.executeForge(picked, hours, "playtime");
+  }
 }
 
 async function main() {
   const args = parseArgs(process.argv);
   if (args.help) {
     console.log(`
-  discord-badge-spoofer  v2.1
+  discord-badge-spoofer  v2.2
 
-  node index.js                     interactive menu
-  node index.js --auto              auto-forge with defaults / env
-  node index.js --auto --hours 2 --titles 30
-  node index.js --auto --dry        dry-run (send nothing)
+  node index.js
+  node index.js --auto --mode playtime --hours 2 --titles 40
+  node index.js --auto --mode stream --hours 5
+  node index.js --auto --mode variety --titles 100
+  node index.js --auto --mode all --hours 2 --titles 40
+  node index.js --auto --dry
 
   Env: DISCORD_TOKEN  CF_CLEARANCE_COOKIE  SPOOF_HOURS  SPOOF_TITLES
 `);

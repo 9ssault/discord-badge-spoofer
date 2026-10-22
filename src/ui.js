@@ -5,7 +5,7 @@
  */
 
 const readline = require("readline/promises");
-const { CH, line, blank, heading, keyValue, dim, plain, info } = require("./log");
+const { CH, line, blank, plain, info } = require("./log");
 const { ORCA } = require("./banner");
 const { LIMITS } = require("./config");
 const vault = require("./vault");
@@ -24,13 +24,14 @@ async function ask(question) {
 
 function closeRl() {
   if (rl) {
-    try { rl.close(); } catch (_) {}
+    try {
+      rl.close();
+    } catch (_) {}
     rl = null;
   }
 }
 
 function paint() {
-  // repaint the whole screen: banner + status strip
   process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
   blank();
   for (const row of ORCA.art) {
@@ -41,25 +42,27 @@ function paint() {
   const s = vault.load();
   const auth = s.token ? (s.cookie ? "ready" : "no cookie") : "no token";
   const mint = s.analyticsToken && Date.now() - s.mintedAt < LIMITS.tokenTTL ? "fresh" : "stale";
-  plain(`  ${CH.dim}auth${CH.reset} ${auth}  ${CH.dim}\u00b7${CH.reset}  ${CH.dim}session${CH.reset} ${mint}  ${CH.dim}\u00b7${CH.reset}  ${CH.dim}forged${CH.reset} ${fmt.int(s.totals.titles)} titles ${CH.dim}/${CH.reset} ${fmt.int(s.totals.hours)}h`);
+  plain(
+    `  ${CH.dim}auth${CH.reset} ${auth}  ${CH.dim}\u00b7${CH.reset}  ${CH.dim}session${CH.reset} ${mint}  ${CH.dim}\u00b7${CH.reset}  ${CH.dim}forged${CH.reset} ${fmt.int(s.totals.titles)} titles ${CH.dim}/${CH.reset} ${fmt.int(s.totals.hours)}h`
+  );
   line();
 }
 
 function paintMenu() {
   paint();
   const options = [
-    ["1", "forge playtime", "batch-claim hours across catalog titles"],
-    ["2", "forge on titles", "search the catalog and pick exact titles"],
-    ["3", "renew session", "re-mint the analytics token / swap cookie"],
-    ["4", "bind fingerprint", "tie an executable_fingerprint to this machine"],
-    ["5", "probe stats", "peek at what discord thinks your playtime is"],
-    ["6", "catalog scan", "search + inspect detected titles"],
-    ["7", "settings", "tune batches, wobble, dry-run mode"],
-    ["8", "journal", "recent forge history"],
+    ["1", "forge playtime", "game-time badge (hours on titles)"],
+    ["2", "forge on titles", "search catalog, pick exact titles"],
+    ["3", "forge stream hours", "streaming badge (video_stream events)"],
+    ["4", "forge games played", "variety badge (many titles, ~1 min)"],
+    ["5", "forge all badges", "playtime + stream + variety in one run"],
+    ["6", "renew session", "re-mint analytics token / swap cookie"],
+    ["7", "bind fingerprint", "PE (win) or synthetic (termux/linux)"],
+    ["8", "probe / catalog / settings / journal", "submenu"],
     ["9", "exit", "shut it down"],
   ];
   for (const [num, name, desc] of options) {
-    plain(`${CH.orange}${num}${CH.reset} ${CH.white}${name.padEnd(18)}${CH.reset} ${CH.dim}${desc}${CH.reset}`);
+    plain(`${CH.orange}${num}${CH.reset} ${CH.white}${name.padEnd(22)}${CH.reset} ${CH.dim}${desc}${CH.reset}`);
   }
   line();
 }
@@ -69,16 +72,35 @@ async function showMenu(ctx) {
   const choice = await ask(`  ${CH.orange}\u276f${CH.reset} select ${CH.dim}[1-9]${CH.reset}: `);
   blank();
   switch (choice) {
-    case "1": await actions.forgeBulk(ctx); break;
-    case "2": await actions.forgeTitles(ctx); break;
-    case "3": await actions.renewSession(ctx); break;
-    case "4": await actions.bindFingerprint(ctx); break;
-    case "5": await actions.probeStats(ctx); break;
-    case "6": await actions.catalogScan(ctx); break;
-    case "7": await actions.editSettings(ctx); break;
-    case "8": await actions.showJournal(ctx); break;
-    case "9": case "": return false;
-    default: info("unknown option");
+    case "1":
+      await actions.forgeBulk(ctx);
+      break;
+    case "2":
+      await actions.forgeTitles(ctx);
+      break;
+    case "3":
+      await actions.forgeStream(ctx);
+      break;
+    case "4":
+      await actions.forgeVariety(ctx);
+      break;
+    case "5":
+      await actions.forgeAll(ctx);
+      break;
+    case "6":
+      await actions.renewSession(ctx);
+      break;
+    case "7":
+      await actions.bindFingerprint(ctx);
+      break;
+    case "8":
+      await actions.toolsSubmenu(ctx);
+      break;
+    case "9":
+    case "":
+      return false;
+    default:
+      info("unknown option");
   }
   return true;
 }
@@ -97,7 +119,6 @@ async function confirm(question) {
 }
 
 async function chooseGames(games, preselected = null) {
-  // interactive multi-select over a (possibly filtered) slice of the catalog.
   let pool = preselected || games;
   if (!pool.length) {
     info("no titles matched");
@@ -131,4 +152,14 @@ function filterGames(games, query) {
   return games.filter((g) => g.name.toLowerCase().includes(q));
 }
 
-module.exports = { ask, closeRl, paint, paintMenu, showMenu, askNumber, confirm, chooseGames, filterGames };
+module.exports = {
+  ask,
+  closeRl,
+  paint,
+  paintMenu,
+  showMenu,
+  askNumber,
+  confirm,
+  chooseGames,
+  filterGames,
+};

@@ -1,8 +1,7 @@
 "use strict";
 
 /**
- * feature flows shared by the cli: playtime forging (bulk + targeted),
- * fingerprint binding, playtime probing, catalog scanning, settings, journal.
+ * feature flows: playtime, stream hours, games-played variety, all-badges, tools.
  */
 
 const fs = require("fs");
@@ -37,7 +36,7 @@ async function forgeBulk(ctx) {
   if (!(await requireReady())) return;
   const s = vault.load();
 
-  info(`catalog loaded ${CH.dim}${BULLET}${CH.reset} ${CH.orange}${catalog.length}${CH.reset} titles`);
+  info(`catalog ${CH.dim}${BULLET}${CH.reset} ${CH.orange}${catalog.length}${CH.reset} titles`);
   const count = await ui.askNumber(
     `  ${CH.dim}titles this run${CH.reset} ${CH.dim}[all]:${CH.reset} `,
     catalog.length,
@@ -63,7 +62,7 @@ async function forgeBulk(ctx) {
     return await settle();
   }
 
-  await executeForge(picked, hoursIn);
+  await executeForge(picked, hoursIn, "playtime");
 }
 
 async function forgeTitles(ctx) {
@@ -94,32 +93,143 @@ async function forgeTitles(ctx) {
     return await settle();
   }
 
-  await executeForge(picked, hoursIn);
+  await executeForge(picked, hoursIn, "playtime");
 }
 
-async function executeForge(picked, hoursEach) {
+async function forgeStream(ctx) {
+  const { games: catalog } = ctx;
+  if (!(await requireReady())) return;
+  const s = vault.load();
+
+  warn("streaming badge needs hours streamed to other users — science events are best-effort");
+  const hoursIn = await ui.askNumber(
+    `  ${CH.dim}stream hours to claim${CH.reset} ${CH.dim}[${s.settings.hoursDefault}]:${CH.reset} `,
+    s.settings.hoursDefault
+  );
+  if (hoursIn === null) {
+    fail("bad number");
+    return await settle();
+  }
+
+  // split hours across a few stream sessions on different titles
+  const sessions = Math.min(12, Math.max(1, Math.ceil(hoursIn)));
+  const per = hoursIn / sessions;
+  const picked = pickRotating(catalog, sessions);
+  if (!picked.length) {
+    fail("no titles");
+    return await settle();
+  }
+
+  await executeForge(picked, per, "stream");
+}
+
+async function forgeVariety(ctx) {
+  const { games: catalog } = ctx;
+  if (!(await requireReady())) return;
+
+  info("games-played / variety badge — marks many titles as played (~1 min each)");
+  const count = await ui.askNumber(
+    `  ${CH.dim}how many titles${CH.reset} ${CH.dim}[100]:${CH.reset} `,
+    100,
+    { integer: true, min: 1 }
+  );
+  if (count === null) {
+    fail("bad number");
+    return await settle();
+  }
+
+  const picked = pickRotating(catalog, count);
+  if (!picked.length) {
+    fail("no titles");
+    return await settle();
+  }
+
+  // ~1 minute per title (variety), hoursEach for journal ≈ 1/60
+  await executeForge(picked, 1 / 60, "variety");
+}
+
+async function forgeAll(ctx) {
+  if (!(await requireReady())) return;
+  const s = vault.load();
+  const { games: catalog } = ctx;
+
+  const hours = await ui.askNumber(
+    `  ${CH.dim}playtime hours per title${CH.reset} ${CH.dim}[${s.settings.hoursDefault}]:${CH.reset} `,
+    s.settings.hoursDefault
+  );
+  if (hours === null) {
+    fail("bad number");
+    return await settle();
+  }
+  const playCount = await ui.askNumber(
+    `  ${CH.dim}playtime titles${CH.reset} ${CH.dim}[30]:${CH.reset} `,
+    30,
+    { integer: true, min: 1 }
+  );
+  if (playCount === null) {
+    fail("bad number");
+    return await settle();
+  }
+  const streamHours = await ui.askNumber(
+    `  ${CH.dim}stream hours total${CH.reset} ${CH.dim}[${hours}]:${CH.reset} `,
+    hours
+  );
+  if (streamHours === null) {
+    fail("bad number");
+    return await settle();
+  }
+  const varietyCount = await ui.askNumber(
+    `  ${CH.dim}variety titles${CH.reset} ${CH.dim}[50]:${CH.reset} `,
+    50,
+    { integer: true, min: 1 }
+  );
+  if (varietyCount === null) {
+    fail("bad number");
+    return await settle();
+  }
+
+  const playPicked = pickRotating(catalog, playCount);
+  await executeForge(playPicked, hours, "playtime");
+
+  const streamSessions = Math.min(12, Math.max(1, Math.ceil(streamHours)));
+  const streamPicked = pickRotating(catalog, streamSessions);
+  await executeForge(streamPicked, streamHours / streamSessions, "stream");
+
+  const varietyPicked = pickRotating(catalog, varietyCount);
+  await executeForge(varietyPicked, 1 / 60, "variety");
+}
+
+async function executeForge(picked, hoursEach, mode = "playtime") {
   const s = vault.load();
   blank();
-  const per = wobbleHours(hoursEach, s.settings.wobble);
-  const ms = Math.floor(per * 3600 * 1000);
+  const per = mode === "variety" ? hoursEach : wobbleHours(hoursEach, s.settings.wobble);
+  const ms = Math.max(1000, Math.floor(per * 3600 * 1000));
+
+  const label =
+    mode === "stream" ? "stream" : mode === "variety" ? "variety" : "playtime";
   info(
-    `forging ${CH.orange}${fmt.hours(per)}${CH.reset} on ${CH.orange}${picked.length}${CH.reset} titles` +
+    `forging ${label} ${CH.orange}${fmt.hours(per)}${CH.reset} × ${CH.orange}${picked.length}${CH.reset}` +
       `${s.settings.dryRun ? ` ${CH.dim}${CH.yellow}(dry run)${CH.reset}` : ""}` +
       ` ${CH.dim}${BULLET}${CH.reset} ~${fmt.hours(per * picked.length)} total`
   );
   line();
 
-  const summary = await forge.runForges(
-    picked,
-    (g) => science.buildSessionTriplet(g, ms),
-    s.settings
-  );
+  let buildEvents;
+  if (mode === "stream") {
+    buildEvents = (g) => science.buildStreamPair(g, ms);
+  } else if (mode === "variety") {
+    buildEvents = (g) => science.buildVarietySession(g);
+  } else {
+    buildEvents = (g) => science.buildSessionTriplet(g, ms);
+  }
+
+  const summary = await forge.runForges(picked, buildEvents, s.settings);
 
   blank();
   line();
   if (summary.failed === 0 && summary.ok > 0) {
     pass(
-      `done ${CH.dim}${BULLET}${CH.reset} ${summary.ok}/${picked.length} titles ${CH.dim}${BULLET}${CH.reset} ${fmt.hours(summary.ok * per)} logged`
+      `done ${CH.dim}${BULLET}${CH.reset} ${summary.ok}/${picked.length} ${label} ${CH.dim}${BULLET}${CH.reset} ${fmt.hours(summary.ok * per)} logged`
     );
     if (!s.settings.dryRun) info(QUIPS());
   } else if (summary.ok === 0) {
@@ -203,14 +313,14 @@ async function probeStats(ctx) {
     keyValue("verified", String(me.verified));
     if (me.premium_type) keyValue("nitro tier", String(me.premium_type));
     blank();
-    info("playtime badge math from local vault:");
+    info("local vault totals:");
     keyValue("titles forged (lifetime)", fmt.int(s.totals.titles));
     keyValue("hours forged (lifetime)", fmt.hours(s.totals.hours));
     keyValue("forge runs", fmt.int(s.totals.runs));
     if (s.lastRun)
       keyValue("last run", `${s.lastRun.ok} titles ${CH.dim}${CH.reset}\u00b7 ${fmt.ago(s.lastRun.at)}`);
     blank();
-    info(`games-played badge needs 5+ titles; hours badge tiers up with total playtime.`);
+    info("badges: game-time (hours) · variety (5+ titles) · streaming (hours with viewers)");
   } catch (e) {
     fail(String(e && e.message ? e.message : e));
   }
@@ -347,13 +457,21 @@ async function showJournal(ctx) {
   await settle();
 }
 
+async function toolsSubmenu(ctx) {
+  plain(`${CH.orange}a${CH.reset} probe stats   ${CH.orange}b${CH.reset} catalog scan   ${CH.orange}c${CH.reset} settings   ${CH.orange}d${CH.reset} journal   ${CH.orange}enter${CH.reset} back`);
+  const c = (await ui.ask(`  ${CH.orange}\u276f${CH.reset} `)).toLowerCase();
+  if (c === "a") await probeStats(ctx);
+  else if (c === "b") await catalogScan(ctx);
+  else if (c === "c") await editSettings(ctx);
+  else if (c === "d") await showJournal(ctx);
+}
+
 function pickRotating(catalog, count) {
   const s = vault.load();
   const recent = new Set(s.recentIds);
   const fresh = catalog.filter((g) => !recent.has(g.id));
   const stale = catalog.filter((g) => recent.has(g.id));
   const pool = fresh.length >= count ? fresh : fresh.concat(stale);
-  // shuffle a bit so auto mode isn't always the same first N
   for (let i = pool.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [pool[i], pool[j]] = [pool[j], pool[i]];
@@ -364,7 +482,7 @@ function pickRotating(catalog, count) {
 async function requireReady() {
   const s = vault.load();
   if (!s.token || !s.cookie) {
-    fail("token/cookie missing - use menu 3 to set them");
+    fail("token/cookie missing - use menu 6 to set them");
     return false;
   }
   if (!vault.tokenFresh()) {
@@ -382,12 +500,16 @@ async function requireReady() {
 module.exports = {
   forgeBulk,
   forgeTitles,
+  forgeStream,
+  forgeVariety,
+  forgeAll,
   bindFingerprint,
   probeStats,
   renewSession,
   catalogScan,
   editSettings,
   showJournal,
+  toolsSubmenu,
   requireReady,
   pickRotating,
   executeForge,

@@ -1,8 +1,9 @@
 "use strict";
 
 /**
- * science event construction. builds launch_game + running_game_heartbeat
- * triplets from a session identity.
+ * science event construction.
+ * - playtime / games-played: launch_game + running_game_heartbeat
+ * - streaming badge: video_stream_started + video_stream_ended
  */
 
 const crypto = require("crypto");
@@ -98,8 +99,6 @@ function buildHeartbeatEvent(game, durationMs, sessionId, initial, final, ts = n
 }
 
 function buildSessionTriplet(game, durationMs) {
-  // open heartbeat (0ms) -> launch_game -> close heartbeat (full duration),
-  // sharing one game_session_id, timestamps spanning the window.
   const sid = crypto.randomUUID();
   const now = Date.now();
   let start = now - durationMs;
@@ -111,4 +110,83 @@ function buildSessionTriplet(game, durationMs) {
   ];
 }
 
-module.exports = { bindSession, nextSeq, buildLaunchEvent, buildHeartbeatEvent, buildSessionTriplet };
+/**
+ * Streaming badge events (video_stream_started / video_stream_ended).
+ * Discord's Streaming badge counts hours streamed to other users.
+ * Science accepts these; server-side may still require a real viewer session.
+ */
+function buildStreamPair(game, durationMs) {
+  const now = Date.now();
+  let start = now - durationMs;
+  if (start < 0) start = now;
+  const mediaSessionId = crypto.randomUUID();
+  const rtcConnectionId = crypto.randomUUID();
+  const streamKey = `call:${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}:${game.id}`;
+
+  const common = {
+    client_heartbeat_session_id: heartbeatSession,
+    event_sequence_number: 0, // filled below
+    media_session_id: mediaSessionId,
+    rtc_connection_id: rtcConnectionId,
+    stream_key: streamKey,
+    stream_type: "go_live",
+    application_id: game.id,
+    application_name: game.name,
+    game_id: game.id,
+    game_name: game.name,
+    game_executable: game.exe,
+    max_viewers: Math.max(1, Math.floor(Math.random() * 4) + 1),
+    num_viewers: 1,
+    voice_participant_type: "streamer",
+    channel_type: 2,
+    connection_type: "udp",
+    client_app_state: "focused",
+    launch_signature: launchSignature,
+  };
+
+  const started = {
+    type: "video_stream_started",
+    properties: {
+      ...common,
+      event_sequence_number: nextSeq(),
+      client_track_timestamp: start,
+      client_send_timestamp: start,
+      duration_go_live_modal: Math.floor(800 + Math.random() * 2000),
+    },
+  };
+
+  const ended = {
+    type: "video_stream_ended",
+    properties: {
+      ...common,
+      event_sequence_number: nextSeq(),
+      client_track_timestamp: now,
+      client_send_timestamp: now,
+      duration: durationMs,
+      duration_ms: durationMs,
+      reason: "user_requested",
+      paused: false,
+      avg_fps: 30,
+      avg_bitrate: 2500 + Math.floor(Math.random() * 1500),
+      avg_resolution: 1080,
+    },
+  };
+
+  return [started, ended];
+}
+
+/** Short playtime session (~1 min) used for games-played / variety badge. */
+function buildVarietySession(game) {
+  const ms = 60_000 + Math.floor(Math.random() * 30_000);
+  return buildSessionTriplet(game, ms);
+}
+
+module.exports = {
+  bindSession,
+  nextSeq,
+  buildLaunchEvent,
+  buildHeartbeatEvent,
+  buildSessionTriplet,
+  buildStreamPair,
+  buildVarietySession,
+};
