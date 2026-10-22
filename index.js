@@ -6,7 +6,7 @@
  *
  * node index.js
  * node index.js --auto --mode all --hours 2 --titles 40
- * node index.js --auto --mode stream --hours 5
+ * node index.js --auto --mode stream --hours 50
  * node index.js --auto --mode variety --titles 100
  */
 
@@ -179,9 +179,10 @@ async function runAuto(args) {
   info(`auto mode=${mode} ${CH.dim}${BULLET}${CH.reset} titles=${titlesWanted} hours=${fmt.hours(hours)}`);
 
   if (mode === "stream" || mode === "all") {
-    const sessions = Math.min(12, Math.max(1, Math.ceil(hours)));
+    const streamHours = mode === "stream" ? hours : hours;
+    const sessions = Math.min(100, Math.max(1, Math.ceil(streamHours / 10)));
     const picked = features.pickRotating(ctx.games, sessions);
-    await features.executeForge(picked, hours / sessions, "stream");
+    await features.executeStreamForge(picked, streamHours, sessions);
   }
   if (mode === "variety" || mode === "all") {
     const picked = features.pickRotating(ctx.games, titlesWanted);
@@ -205,7 +206,7 @@ async function main() {
 
   node index.js
   node index.js --auto --mode playtime --hours 2 --titles 40
-  node index.js --auto --mode stream --hours 5
+  node index.js --auto --mode stream --hours 50
   node index.js --auto --mode variety --titles 100
   node index.js --auto --mode all --hours 2 --titles 40
   node index.js --auto --dry
