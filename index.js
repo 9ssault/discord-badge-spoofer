@@ -2,12 +2,14 @@
 "use strict";
 
 /**
- * playtime / stream / variety badge forge.
+ * Badges Spoofer — interactive + auto CLI
  *
  * node index.js
  * node index.js --auto --mode all --hours 2 --titles 40
- * node index.js --auto --mode stream --hours 50
- * node index.js --auto --mode variety --titles 100
+ * node index.js --auto --mode stream --hours 50 --pace drip
+ * node index.js --auto --preset max-variety
+ * node index.js --auto --target 500 --mode playtime
+ * node index.js --profile alt
  */
 
 const vault = require("./src/vault");
@@ -17,8 +19,9 @@ const features = require("./src/features");
 const ui = require("./src/ui");
 const auth = require("./src/auth");
 const envstore = require("./src/envstore");
+const badges = require("./src/badges");
 const { CH, info, pass, fail, warn, BULLET, blank, line } = require("./src/log");
-const { PATHS, ENDPOINTS } = require("./src/config");
+const { PATHS, ENDPOINTS, PRESETS } = require("./src/config");
 const { ORCA } = require("./src/banner");
 const fmt = require("./src/format");
 
@@ -31,7 +34,12 @@ function parseArgs(argv) {
     titles: null,
     dry: false,
     help: false,
-    mode: "playtime", // playtime | stream | variety | all
+    mode: "playtime",
+    pace: null,
+    preset: null,
+    target: null,
+    profile: null,
+    filter: null,
   };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
@@ -41,6 +49,11 @@ function parseArgs(argv) {
     else if (a === "--hours" || a === "-H") args.hours = Number(argv[++i]);
     else if (a === "--titles" || a === "-t") args.titles = Number(argv[++i]);
     else if (a === "--mode" || a === "-m") args.mode = String(argv[++i] || "playtime").toLowerCase();
+    else if (a === "--pace") args.pace = String(argv[++i] || "").toLowerCase();
+    else if (a === "--preset") args.preset = String(argv[++i] || "").toLowerCase();
+    else if (a === "--target") args.target = Number(argv[++i]);
+    else if (a === "--profile") args.profile = String(argv[++i] || "");
+    else if (a === "--filter") args.filter = String(argv[++i] || "").toLowerCase();
   }
   return args;
 }
@@ -73,91 +86,71 @@ async function bootstrap({ interactive }) {
   blank();
   seedFromEnv();
   const s = vault.load();
-  const authState = s.token ? (s.cookie ? "ready" : "cookie missing") : "no token";
-
-  info(`vault ${CH.dim}${BULLET}${CH.reset} ${PATHS.vault}`);
-  info(`auth ${CH.dim}${BULLET}${CH.reset} ${authState}`);
+  info(`vault ${CH.dim}${BULLET}${CH.reset} ${PATHS.vault}  profile=${s.activeProfile}`);
   info(`platform ${CH.dim}${BULLET}${CH.reset} ${process.platform} / node ${process.versions.node}`);
-  if (s.totals.titles > 0) {
-    info(
-      `history ${CH.dim}${BULLET}${CH.reset} ${fmt.int(s.totals.titles)} titles ${CH.dim}/${CH.reset} ${fmt.hours(s.totals.hours)} forged`
-    );
-  }
   blank();
 
   if (!s.token) {
     if (!interactive) {
-      fail("DISCORD_TOKEN missing (set env or run interactive once)");
+      fail("DISCORD_TOKEN missing");
       return false;
     }
-    info("paste your discord account token");
     const tok = await ui.ask(`  ${CH.dim}token:${CH.reset} `);
     if (!tok) {
-      fail("a token is required");
+      fail("token required");
       return false;
     }
     s.token = tok;
     vault.save();
-    pass("token stored");
     envstore.sync({ token: tok });
-  } else {
-    pass(`token loaded ${CH.dim}(${auth.userIdFromToken(s.token) || "id unknown"})${CH.reset}`);
-  }
+    pass("token stored");
+  } else pass(`token loaded (${auth.userIdFromToken(s.token) || "?"})`);
 
   if (!s.cookie) {
     if (!interactive) {
-      fail("CF_CLEARANCE_COOKIE missing (set env or run interactive once)");
+      fail("CF_CLEARANCE_COOKIE missing");
       return false;
     }
-    blank();
-    info("paste your cf_clearance cookie header");
-    info(`${CH.dim}discord.com -> devtools -> application -> cookies -> cf_clearance${CH.reset}`);
     const ck = await ui.ask(`  ${CH.dim}cookie:${CH.reset} `);
     if (!ck) {
-      fail("a cookie is required");
+      fail("cookie required");
       return false;
     }
     s.cookie = ck;
     vault.save();
-    pass("cookie stored");
     envstore.sync({ cookie: ck });
-  } else {
-    pass("cookie loaded");
-  }
+    pass("cookie stored");
+  } else pass("cookie loaded");
 
   if (!s.fingerprint) {
     try {
       const uid = auth.userIdFromToken(s.token) || "0";
       s.fingerprint = auth.syntheticFingerprint(uid);
       vault.save();
-      pass(`synthetic fingerprint bound ${CH.dim}(${s.fingerprint.length} chars)${CH.reset}`);
+      pass(`synthetic fingerprint (${s.fingerprint.length} chars)`);
     } catch (e) {
-      warn(`fingerprint skipped: ${e.message || e}`);
+      warn(String(e.message || e));
     }
   }
 
   blank();
-  info("loading game catalog...");
+  info("loading catalog…");
   ctx.games = await gamesMod.loadGames();
   if (!ctx.games.length) {
-    fail("couldn't load the game catalog");
-    info(`tried ${PATHS.gameList} and ${ENDPOINTS.catalog}`);
+    fail("catalog empty");
     return false;
   }
-  pass(`${CH.orange}${ctx.games.length}${CH.reset} titles indexed`);
+  pass(`${ctx.games.length} titles`);
 
   blank();
-  info("establishing session...");
   try {
     await session.begin();
     if (!vault.tokenFresh()) await session.renew();
     pass("session established");
   } catch (e) {
-    fail(String(e && e.message ? e.message : e));
-    warn("if 401/403: refresh token + cf_clearance cookie (menu 6)");
+    fail(String(e.message || e));
     return false;
   }
-
   blank();
   info(quip());
   return true;
@@ -166,35 +159,74 @@ async function bootstrap({ interactive }) {
 async function runAuto(args) {
   const s = vault.load();
   if (args.dry) s.settings.dryRun = true;
-  const hours =
+  if (args.pace === "drip" || args.pace === "aggressive") s.settings.pace = args.pace;
+  if (args.filter) s.settings.catalogFilter = args.filter;
+  vault.save();
+
+  let mode = args.mode || "playtime";
+  let hours =
     Number.isFinite(args.hours) && args.hours > 0
       ? args.hours
       : Number(process.env.SPOOF_HOURS) || s.settings.hoursDefault || 1;
-  const titlesWanted =
+  let titlesWanted =
     Number.isFinite(args.titles) && args.titles > 0
       ? Math.floor(args.titles)
       : Number(process.env.SPOOF_TITLES) || Math.min(50, ctx.games.length);
 
-  const mode = args.mode || "playtime";
-  info(`auto mode=${mode} ${CH.dim}${BULLET}${CH.reset} titles=${titlesWanted} hours=${fmt.hours(hours)}`);
+  if (args.preset && PRESETS[args.preset]) {
+    const p = PRESETS[args.preset];
+    mode = p.mode || mode;
+    if (p.hours != null) hours = p.hours;
+    if (p.titles != null) titlesWanted = p.titles;
+    info(`preset ${args.preset}`);
+  }
+
+  // --target N means forge until vault hours reach N (playtime) or stream hours
+  if (Number.isFinite(args.target) && args.target > 0) {
+    if (mode === "stream") {
+      const need = Math.max(0, args.target - (s.totals.streamHours || 0));
+      if (need <= 0) {
+        pass(`already at/above stream target ${args.target}h`);
+        return;
+      }
+      hours = need;
+      info(`target stream ${args.target}h · need ${fmt.hours(need)}`);
+    } else if (mode === "variety") {
+      const need = Math.max(0, Math.floor(args.target) - (s.totals.varietyTitles || 0));
+      if (need <= 0) {
+        pass(`already at variety target`);
+        return;
+      }
+      titlesWanted = need;
+    } else {
+      const need = Math.max(0, args.target - s.totals.hours);
+      if (need <= 0) {
+        pass(`already at/above playtime target ${args.target}h`);
+        return;
+      }
+      // spread across titles
+      titlesWanted = Math.min(titlesWanted, Math.max(5, Math.ceil(need)));
+      hours = need / titlesWanted;
+      info(`target playtime ${args.target}h · need ${fmt.hours(need)} across ${titlesWanted} titles`);
+    }
+  }
+
+  const catalog = features.filteredCatalog(ctx.games);
+  info(`auto mode=${mode} pace=${s.settings.pace} filter=${s.settings.catalogFilter}`);
 
   if (mode === "stream" || mode === "all") {
     const streamHours = mode === "stream" ? hours : hours;
     const sessions = Math.min(100, Math.max(1, Math.ceil(streamHours / 10)));
-    const picked = features.pickRotating(ctx.games, sessions);
-    await features.executeStreamForge(picked, streamHours, sessions);
+    await features.executeStreamForge(features.pickRotating(catalog, sessions), streamHours, sessions);
   }
   if (mode === "variety" || mode === "all") {
-    const picked = features.pickRotating(ctx.games, titlesWanted);
-    await features.executeForge(picked, 1 / 60, "variety");
+    await features.executeForge(features.pickRotating(catalog, titlesWanted), 1 / 60, "variety");
   }
   if (mode === "playtime" || mode === "all") {
-    const picked = features.pickRotating(ctx.games, titlesWanted);
-    if (!picked.length) {
-      fail("no titles to forge");
-      return;
-    }
-    await features.executeForge(picked, hours, "playtime");
+    await features.executeForge(features.pickRotating(catalog, titlesWanted), hours, "playtime");
+  }
+  if (mode === "next") {
+    await features.forgeToNextTier(ctx);
   }
 }
 
@@ -205,15 +237,22 @@ async function main() {
   badges spoofer
 
   node index.js
-  node index.js --auto --mode playtime --hours 2 --titles 40
-  node index.js --auto --mode stream --hours 50
-  node index.js --auto --mode variety --titles 100
-  node index.js --auto --mode all --hours 2 --titles 40
-  node index.js --auto --dry
+  node index.js --auto --mode playtime|stream|variety|all|next
+  node index.js --auto --hours 2 --titles 40 --pace aggressive|drip
+  node index.js --auto --target 500 --mode playtime
+  node index.js --auto --preset max-variety|quick-play|dump-stream|…
+  node index.js --profile <name>
+  node index.js --filter all|verified|steam|no-launcher
+  node index.js --dry
 
   Env: DISCORD_TOKEN  CF_CLEARANCE_COOKIE  SPOOF_HOURS  SPOOF_TITLES
 `);
     return;
+  }
+
+  if (args.profile) {
+    vault.switchProfile(args.profile);
+    info(`profile → ${args.profile}`);
   }
 
   const ok = await bootstrap({ interactive: !args.auto });
@@ -232,11 +271,9 @@ async function main() {
     const again = await ui.showMenu(ctx);
     if (!again) break;
   }
-
   blank();
   line();
   info("shutting down");
-  line();
 }
 
 main()
@@ -244,13 +281,9 @@ main()
     if (err && (err.name === "AbortError" || err.code === "ERR_USE_AFTER_CLOSE")) {
       console.log();
       fail("interrupted");
-    } else {
-      console.error(err);
-    }
+    } else console.error(err);
   })
-  .finally(() => {
-    ui.closeRl();
-  });
+  .finally(() => ui.closeRl());
 
 process.on("SIGINT", () => {
   console.log();
