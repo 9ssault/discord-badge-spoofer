@@ -1,9 +1,5 @@
 "use strict";
 
-/**
- * the terminal ui: banner, live status line, menus, and all prompts.
- */
-
 const readline = require("readline/promises");
 const { CH, line, blank, plain, info } = require("./log");
 const { ORCA } = require("./banner");
@@ -34,16 +30,17 @@ function closeRl() {
 function paint() {
   process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
   blank();
-  for (const row of ORCA.art) {
-    plain(`${CH.orange}${row}${CH.reset}`);
-  }
+  for (const row of ORCA.art) plain(`${CH.orange}${row}${CH.reset}`);
   plain(`${CH.dim}  ${ORCA.tagline}${CH.reset}`);
   blank();
   const s = vault.load();
   const auth = s.token ? (s.cookie ? "ready" : "no cookie") : "no token";
   const mint = s.analyticsToken && Date.now() - s.mintedAt < LIMITS.tokenTTL ? "fresh" : "stale";
   plain(
-    `  ${CH.dim}auth${CH.reset} ${auth}  ${CH.dim}\u00b7${CH.reset}  ${CH.dim}session${CH.reset} ${mint}  ${CH.dim}\u00b7${CH.reset}  ${CH.dim}forged${CH.reset} ${fmt.int(s.totals.titles)} titles ${CH.dim}/${CH.reset} ${fmt.int(s.totals.hours)}h`
+    `  ${CH.dim}profile${CH.reset} ${s.activeProfile || "default"}  ${CH.dim}·${CH.reset}  ${CH.dim}auth${CH.reset} ${auth}  ${CH.dim}·${CH.reset}  ${CH.dim}session${CH.reset} ${mint}`
+  );
+  plain(
+    `  ${CH.dim}forged${CH.reset} ${fmt.int(s.totals.titles)} titles / ${fmt.hours(s.totals.hours)} play · ${fmt.hours(s.totals.streamHours || 0)} stream · ${fmt.int(s.totals.varietyTitles || 0)} variety  ${CH.dim}pace=${s.settings.pace}${CH.reset}`
   );
   line();
 }
@@ -51,15 +48,17 @@ function paint() {
 function paintMenu() {
   paint();
   const options = [
-    ["1", "forge playtime", "game-time badge (hours on titles)"],
-    ["2", "forge on titles", "search catalog, pick exact titles"],
-    ["3", "forge stream hours", "streaming badge (video_stream events)"],
-    ["4", "forge games played", "variety badge (many titles, ~1 min)"],
-    ["5", "forge all badges", "playtime + stream + variety in one run"],
-    ["6", "renew session", "re-mint analytics token / swap cookie"],
-    ["7", "bind fingerprint", "PE (win) or synthetic (termux/linux)"],
-    ["8", "probe / catalog / settings / journal", "submenu"],
-    ["9", "exit", "shut it down"],
+    ["1", "forge playtime", "game-time badge"],
+    ["2", "forge on titles", "search & pick"],
+    ["3", "forge stream hours", "streaming science"],
+    ["4", "forge games played", "variety badge"],
+    ["5", "forge all badges", "play + stream + variety"],
+    ["6", "forge to next tier", "auto gap to next ladder step"],
+    ["7", "badge ladder", "tiers + vault progress"],
+    ["8", "renew session", "token / cookie"],
+    ["9", "bind fingerprint", "win PE / synthetic"],
+    ["0", "tools / profiles", "settings, journal, export…"],
+    ["x", "exit", ""],
   ];
   for (const [num, name, desc] of options) {
     plain(`${CH.orange}${num}${CH.reset} ${CH.white}${name.padEnd(22)}${CH.reset} ${CH.dim}${desc}${CH.reset}`);
@@ -69,7 +68,7 @@ function paintMenu() {
 
 async function showMenu(ctx) {
   const actions = require("./features");
-  const choice = await ask(`  ${CH.orange}\u276f${CH.reset} select ${CH.dim}[1-9]${CH.reset}: `);
+  const choice = (await ask(`  ${CH.orange}❯${CH.reset} select: `)).toLowerCase();
   blank();
   switch (choice) {
     case "1":
@@ -88,15 +87,21 @@ async function showMenu(ctx) {
       await actions.forgeAll(ctx);
       break;
     case "6":
-      await actions.renewSession(ctx);
+      await actions.forgeToNextTier(ctx);
       break;
     case "7":
-      await actions.bindFingerprint(ctx);
+      await actions.showLadder(ctx);
       break;
     case "8":
-      await actions.toolsSubmenu(ctx);
+      await actions.renewSession(ctx);
       break;
     case "9":
+      await actions.bindFingerprint(ctx);
+      break;
+    case "0":
+      await actions.toolsSubmenu(ctx);
+      break;
+    case "x":
     case "":
       return false;
     default:
@@ -118,8 +123,8 @@ async function confirm(question) {
   return a === "y" || a === "yes";
 }
 
-async function chooseGames(games, preselected = null) {
-  let pool = preselected || games;
+async function chooseGames(gamesList, preselected = null) {
+  let pool = preselected || gamesList;
   if (!pool.length) {
     info("no titles matched");
     return [];
@@ -127,7 +132,7 @@ async function chooseGames(games, preselected = null) {
   pool.slice(0, 30).forEach((g, i) => {
     plain(`  ${CH.dim}${String(i + 1).padStart(2)}${CH.reset} ${g.name} ${CH.dim}<${g.id}>${CH.reset}`);
   });
-  const raw = await ask(`  ${CH.dim}pick numbers (comma/ranges, enter=first 5, a=all):${CH.reset} `);
+  const raw = await ask(`  ${CH.dim}pick (comma/ranges, enter=first 5, a=all):${CH.reset} `);
   const idxs = [];
   if (!raw.trim()) idxs.push(0, 1, 2, 3, 4);
   else if (raw.toLowerCase() === "a") pool.forEach((_, i) => idxs.push(i));
@@ -138,18 +143,10 @@ async function chooseGames(games, preselected = null) {
       const bounds = p.split("-").map((x) => parseInt(x, 10));
       if (bounds.length === 2 && bounds.every(Number.isInteger)) {
         for (let i = Math.min(...bounds); i <= Math.max(...bounds); i++) idxs.push(i - 1);
-      } else if (Number.isInteger(bounds[0])) {
-        idxs.push(bounds[0] - 1);
-      }
+      } else if (Number.isInteger(bounds[0])) idxs.push(bounds[0] - 1);
     }
   }
   return [...new Set(idxs)].filter((i) => i >= 0 && i < pool.length).map((i) => pool[i]);
-}
-
-function filterGames(games, query) {
-  const q = (query || "").trim().toLowerCase();
-  if (!q) return games;
-  return games.filter((g) => g.name.toLowerCase().includes(q));
 }
 
 module.exports = {
@@ -161,5 +158,4 @@ module.exports = {
   askNumber,
   confirm,
   chooseGames,
-  filterGames,
 };

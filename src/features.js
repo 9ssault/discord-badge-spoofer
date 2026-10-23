@@ -1,13 +1,9 @@
 "use strict";
 
-/**
- * feature flows: playtime, stream hours, games-played variety, all-badges, tools.
- */
-
 const fs = require("fs");
 const { CH, BULLET, info, pass, fail, warn, line, blank, plain, keyValue } = require("./log");
 const { ORCA } = require("./banner");
-const { LIMITS, PATHS } = require("./config");
+const { LIMITS, PATHS, PRESETS } = require("./config");
 const vault = require("./vault");
 const fmt = require("./format");
 const ui = require("./ui");
@@ -17,13 +13,14 @@ const forge = require("./forge");
 const games = require("./games");
 const auth = require("./auth");
 const envstore = require("./envstore");
+const badges = require("./badges");
+const checkpoint = require("./checkpoint");
 
 const QUIPS = () => ORCA.quips[Math.floor(Math.random() * ORCA.quips.length)];
 
 function wobbleHours(h, enabled) {
   if (!enabled) return h;
-  const drift = 1 + (Math.random() * 0.06 - 0.03);
-  return Math.max(0.01, h * drift);
+  return Math.max(0.01, h * (1 + (Math.random() * 0.06 - 0.03)));
 }
 
 async function settle() {
@@ -31,22 +28,24 @@ async function settle() {
   await pause();
 }
 
-async function forgeBulk(ctx) {
-  const { games: catalog } = ctx;
-  if (!(await requireReady())) return;
+function filteredCatalog(catalog) {
   const s = vault.load();
+  return games.applyFilter(catalog, s.settings.catalogFilter);
+}
 
-  info(`catalog ${CH.dim}${BULLET}${CH.reset} ${CH.orange}${catalog.length}${CH.reset} titles`);
-  const count = await ui.askNumber(
-    `  ${CH.dim}titles this run${CH.reset} ${CH.dim}[all]:${CH.reset} `,
-    catalog.length,
-    { integer: true, min: 1 }
-  );
+async function forgeBulk(ctx) {
+  if (!(await requireReady())) return;
+  const catalog = filteredCatalog(ctx.games);
+  const s = vault.load();
+  info(`catalog ${CH.dim}${BULLET}${CH.reset} ${CH.orange}${catalog.length}${CH.reset} titles (filter=${s.settings.catalogFilter})`);
+  const count = await ui.askNumber(`  ${CH.dim}titles this run${CH.reset} ${CH.dim}[all]:${CH.reset} `, catalog.length, {
+    integer: true,
+    min: 1,
+  });
   if (count === null) {
     fail("bad number");
     return await settle();
   }
-
   const hoursIn = await ui.askNumber(
     `  ${CH.dim}hours per title${CH.reset} ${CH.dim}[${s.settings.hoursDefault}]:${CH.reset} `,
     s.settings.hoursDefault
@@ -55,35 +54,30 @@ async function forgeBulk(ctx) {
     fail("bad number");
     return await settle();
   }
-
   const picked = pickRotating(catalog, count);
   if (!picked.length) {
     fail("no titles selected");
     return await settle();
   }
-
   await executeForge(picked, hoursIn, "playtime");
 }
 
 async function forgeTitles(ctx) {
-  const { games: catalog } = ctx;
   if (!(await requireReady())) return;
+  const catalog = filteredCatalog(ctx.games);
   const s = vault.load();
-
   const q = await ui.ask(`  ${CH.dim}search titles:${CH.reset} `);
   const matches = games.searchGames(catalog, q);
   if (!matches.length) {
     fail("no matches");
     return await settle();
   }
-
   info(`${matches.length} match${matches.length === 1 ? "" : "es"}`);
   const picked = await ui.chooseGames(matches);
   if (!picked.length) {
     info("nothing picked");
     return await settle();
   }
-
   const hoursIn = await ui.askNumber(
     `  ${CH.dim}hours per title${CH.reset} ${CH.dim}[${s.settings.hoursDefault}]:${CH.reset} `,
     s.settings.hoursDefault
@@ -92,32 +86,24 @@ async function forgeTitles(ctx) {
     fail("bad number");
     return await settle();
   }
-
   await executeForge(picked, hoursIn, "playtime");
 }
 
 async function forgeStream(ctx) {
-  const { games: catalog } = ctx;
   if (!(await requireReady())) return;
-  const s = vault.load();
-
-  info("streaming badge — pure science forge (video_stream_started / ended)");
-  info(`${CH.dim}packs many hours into large sessions, posted in big /science batches${CH.reset}`);
-
-  const hoursIn = await ui.askNumber(
-    `  ${CH.dim}total stream hours to claim${CH.reset} ${CH.dim}[50]:${CH.reset} `,
-    50,
-    { min: 0.1 }
-  );
+  const catalog = filteredCatalog(ctx.games);
+  info("streaming badge — pure science forge");
+  info(`${CH.dim}optional real Go Live is not bundled (see README)${CH.reset}`);
+  const hoursIn = await ui.askNumber(`  ${CH.dim}total stream hours${CH.reset} ${CH.dim}[50]:${CH.reset} `, 50, {
+    min: 0.1,
+  });
   if (hoursIn === null) {
     fail("bad number");
     return await settle();
   }
-
-  // fewer, longer sessions (default ~10h each, cap 100 sessions)
   const defaultSessions = Math.min(100, Math.max(1, Math.ceil(hoursIn / 10)));
   const sessions = await ui.askNumber(
-    `  ${CH.dim}how many stream sessions${CH.reset} ${CH.dim}[${defaultSessions}]:${CH.reset} `,
+    `  ${CH.dim}sessions${CH.reset} ${CH.dim}[${defaultSessions}]:${CH.reset} `,
     defaultSessions,
     { integer: true, min: 1 }
   );
@@ -125,53 +111,42 @@ async function forgeStream(ctx) {
     fail("bad number");
     return await settle();
   }
-
   const picked = pickRotating(catalog, sessions);
   if (!picked.length) {
     fail("no titles");
     return await settle();
   }
-
   await executeStreamForge(picked, hoursIn, sessions);
 }
 
 async function executeStreamForge(picked, totalHours, sessions) {
   const s = vault.load();
   blank();
-
   const built = science.buildStreamBatch(picked, totalHours, sessions);
   const events = built.events;
-  const hoursEach = built.hoursEach;
-
   info(
-    `forging stream ${CH.orange}${fmt.hours(totalHours)}${CH.reset} across ${CH.orange}${built.sessions}${CH.reset} sessions` +
-      ` ${CH.dim}(~${fmt.hours(hoursEach)} each)${CH.reset}` +
-      `${s.settings.dryRun ? ` ${CH.dim}${CH.yellow}(dry run)${CH.reset}` : ""}`
+    `forging stream ${CH.orange}${fmt.hours(totalHours)}${CH.reset} × ${CH.orange}${built.sessions}${CH.reset} sessions` +
+      ` ${CH.dim}(~${fmt.hours(built.hoursEach)} each)${CH.reset}` +
+      `${s.settings.dryRun ? ` ${CH.yellow}(dry)${CH.reset}` : ""}` +
+      ` ${CH.dim}pace=${s.settings.pace}${CH.reset}`
   );
-  info(`${CH.dim}${events.length} events → large /science batches${CH.reset}`);
   line();
-
-  // 80 events ≈ 40 stream pairs per HTTP request
+  const cp = checkpoint.load();
+  const resumeFrom = cp && cp.mode === "stream events" ? cp.index || 0 : 0;
+  if (resumeFrom > 0) info(`resuming from event ${resumeFrom}`);
   const summary = await forge.runEventBatches(events, s.settings, {
     eventChunkSize: 80,
     label: "stream events",
+    resumeFrom,
   });
-
   blank();
   line();
   if (summary.failed === 0 && summary.eventOk > 0) {
-    pass(
-      `done ${CH.dim}${BULLET}${CH.reset} ${summary.eventOk}/${events.length} events accepted` +
-        ` ${CH.dim}${BULLET}${CH.reset} ${fmt.hours(totalHours)} claimed`
-    );
+    pass(`done ${summary.eventOk}/${events.length} events · ${fmt.hours(totalHours)} claimed`);
     if (!s.settings.dryRun) info(QUIPS());
-  } else if (summary.eventOk === 0) {
-    fail("nothing was accepted");
-  } else {
-    warn(`partial ${CH.dim}${BULLET}${CH.reset} ${summary.eventOk} events ok, ${summary.failed} batches refused`);
-  }
-
-  forge.recordRun(summary, hoursEach, s.settings.dryRun, {
+  } else if (summary.eventOk === 0) fail("nothing was accepted");
+  else warn(`partial · ${summary.eventOk} events ok`);
+  forge.recordRun(summary, built.hoursEach, s.settings.dryRun, {
     mode: "stream",
     totalHours,
     sessions: built.sessions,
@@ -181,79 +156,51 @@ async function executeStreamForge(picked, totalHours, sessions) {
 }
 
 async function forgeVariety(ctx) {
-  const { games: catalog } = ctx;
   if (!(await requireReady())) return;
-
-  info("games-played / variety badge — marks many titles as played (~1 min each)");
-  const count = await ui.askNumber(
-    `  ${CH.dim}how many titles${CH.reset} ${CH.dim}[100]:${CH.reset} `,
-    100,
-    { integer: true, min: 1 }
-  );
+  const catalog = filteredCatalog(ctx.games);
+  const count = await ui.askNumber(`  ${CH.dim}how many titles${CH.reset} ${CH.dim}[100]:${CH.reset} `, 100, {
+    integer: true,
+    min: 1,
+  });
   if (count === null) {
     fail("bad number");
     return await settle();
   }
-
   const picked = pickRotating(catalog, count);
   if (!picked.length) {
     fail("no titles");
     return await settle();
   }
-
   await executeForge(picked, 1 / 60, "variety");
 }
 
 async function forgeAll(ctx) {
   if (!(await requireReady())) return;
   const s = vault.load();
-  const { games: catalog } = ctx;
-
+  const catalog = filteredCatalog(ctx.games);
   const hours = await ui.askNumber(
-    `  ${CH.dim}playtime hours per title${CH.reset} ${CH.dim}[${s.settings.hoursDefault}]:${CH.reset} `,
+    `  ${CH.dim}playtime hours/title${CH.reset} ${CH.dim}[${s.settings.hoursDefault}]:${CH.reset} `,
     s.settings.hoursDefault
   );
-  if (hours === null) {
-    fail("bad number");
-    return await settle();
-  }
-  const playCount = await ui.askNumber(
-    `  ${CH.dim}playtime titles${CH.reset} ${CH.dim}[30]:${CH.reset} `,
-    30,
-    { integer: true, min: 1 }
-  );
-  if (playCount === null) {
-    fail("bad number");
-    return await settle();
-  }
-  const streamHours = await ui.askNumber(
-    `  ${CH.dim}stream hours total${CH.reset} ${CH.dim}[50]:${CH.reset} `,
-    50,
-    { min: 0.1 }
-  );
-  if (streamHours === null) {
-    fail("bad number");
-    return await settle();
-  }
-  const varietyCount = await ui.askNumber(
-    `  ${CH.dim}variety titles${CH.reset} ${CH.dim}[50]:${CH.reset} `,
-    50,
-    { integer: true, min: 1 }
-  );
-  if (varietyCount === null) {
-    fail("bad number");
-    return await settle();
-  }
-
-  const playPicked = pickRotating(catalog, playCount);
-  await executeForge(playPicked, hours, "playtime");
-
-  const streamSessions = Math.min(100, Math.max(1, Math.ceil(streamHours / 10)));
-  const streamPicked = pickRotating(catalog, streamSessions);
-  await executeStreamForge(streamPicked, streamHours, streamSessions);
-
-  const varietyPicked = pickRotating(catalog, varietyCount);
-  await executeForge(varietyPicked, 1 / 60, "variety");
+  if (hours === null) return await settle();
+  const playCount = await ui.askNumber(`  ${CH.dim}playtime titles${CH.reset} ${CH.dim}[30]:${CH.reset} `, 30, {
+    integer: true,
+    min: 1,
+  });
+  if (playCount === null) return await settle();
+  const streamHours = await ui.askNumber(`  ${CH.dim}stream hours${CH.reset} ${CH.dim}[50]:${CH.reset} `, 50, {
+    min: 0.1,
+  });
+  if (streamHours === null) return await settle();
+  const varietyCount = await ui.askNumber(`  ${CH.dim}variety titles${CH.reset} ${CH.dim}[50]:${CH.reset} `, 50, {
+    integer: true,
+    min: 1,
+  });
+  if (varietyCount === null) return await settle();
+  await executeForge(pickRotating(catalog, playCount), hours, "playtime");
+  const ss = Math.min(100, Math.max(1, Math.ceil(streamHours / 10)));
+  await executeStreamForge(pickRotating(catalog, ss), streamHours, ss);
+  await executeForge(pickRotating(catalog, varietyCount), 1 / 60, "variety");
 }
 
 async function executeForge(picked, hoursEach, mode = "playtime") {
@@ -261,41 +208,169 @@ async function executeForge(picked, hoursEach, mode = "playtime") {
   blank();
   const per = mode === "variety" ? hoursEach : wobbleHours(hoursEach, s.settings.wobble);
   const ms = Math.max(1000, Math.floor(per * 3600 * 1000));
-
-  const label =
-    mode === "stream" ? "stream" : mode === "variety" ? "variety" : "playtime";
+  const label = mode === "variety" ? "variety" : "playtime";
   info(
     `forging ${label} ${CH.orange}${fmt.hours(per)}${CH.reset} × ${CH.orange}${picked.length}${CH.reset}` +
-      `${s.settings.dryRun ? ` ${CH.dim}${CH.yellow}(dry run)${CH.reset}` : ""}` +
-      ` ${CH.dim}${BULLET}${CH.reset} ~${fmt.hours(per * picked.length)} total`
+      `${s.settings.dryRun ? ` ${CH.yellow}(dry)${CH.reset}` : ""}` +
+      ` ${CH.dim}pace=${s.settings.pace}${CH.reset}` +
+      ` · ~${fmt.hours(per * picked.length)} total`
   );
   line();
-
-  let buildEvents;
-  if (mode === "stream") {
-    buildEvents = (g) => science.buildStreamPair(g, ms);
-  } else if (mode === "variety") {
-    buildEvents = (g) => science.buildVarietySession(g);
-  } else {
-    buildEvents = (g) => science.buildSessionTriplet(g, ms);
+  const buildEvents =
+    mode === "variety"
+      ? (g) => science.buildVarietySession(g)
+      : (g) => science.buildSessionTriplet(g, ms);
+  const cp = checkpoint.load();
+  let resumeFrom = 0;
+  if (cp && cp.mode === mode && Array.isArray(cp.gameIds)) {
+    resumeFrom = cp.index || 0;
+    if (resumeFrom > 0) info(`resuming ${mode} from index ${resumeFrom}`);
   }
-
-  const summary = await forge.runForges(picked, buildEvents, s.settings);
-
+  const summary = await forge.runForges(picked, buildEvents, s.settings, { resumeFrom, mode });
   blank();
   line();
   if (summary.failed === 0 && summary.ok > 0) {
-    pass(
-      `done ${CH.dim}${BULLET}${CH.reset} ${summary.ok}/${picked.length} ${label} ${CH.dim}${BULLET}${CH.reset} ${fmt.hours(summary.ok * per)} logged`
-    );
+    pass(`done ${summary.ok}/${picked.length} ${label} · ${fmt.hours(summary.ok * per)} logged`);
     if (!s.settings.dryRun) info(QUIPS());
-  } else if (summary.ok === 0) {
-    fail("nothing was accepted");
-  } else {
-    warn(`partial ${CH.dim}${BULLET}${CH.reset} ${summary.ok} ok, ${summary.failed} refused`);
-  }
+  } else if (summary.ok === 0) fail("nothing was accepted");
+  else warn(`partial · ${summary.ok} ok, ${summary.failed} refused`);
   forge.recordRun(summary, per, s.settings.dryRun, { mode });
   if (!s.settings.dryRun) vault.rotateMemory(picked.map((g) => g.id));
+  await settle();
+}
+
+async function showLadder(ctx) {
+  const s = vault.load();
+  blank();
+  line();
+  plain(`${CH.white}Game time${CH.reset}  (vault hours: ${fmt.hours(s.totals.hours)})`);
+  for (const t of badges.GAME_TIME) {
+    const hit = s.totals.hours >= t.hours;
+    plain(`  ${hit ? CH.green + "✓" : CH.dim + "·"}${CH.reset} ${String(t.hours).padStart(5)}h  ${t.name}`);
+  }
+  const ng = badges.nextTier(badges.GAME_TIME, s.totals.hours, "hours");
+  if (ng) info(`next game-time: ${ng.name} (+${fmt.hours(ng.hours - s.totals.hours)})`);
+  blank();
+  plain(`${CH.white}Streaming${CH.reset}  (vault: ${fmt.hours(s.totals.streamHours || 0)})`);
+  for (const t of badges.STREAM) {
+    const hit = (s.totals.streamHours || 0) >= t.hours;
+    plain(`  ${hit ? CH.green + "✓" : CH.dim + "·"}${CH.reset} ${String(t.hours).padStart(5)}h  ${t.name}`);
+  }
+  const ns = badges.nextTier(badges.STREAM, s.totals.streamHours || 0, "hours");
+  if (ns) info(`next stream: ${ns.name} (+${fmt.hours(ns.hours - (s.totals.streamHours || 0))})`);
+  blank();
+  plain(`${CH.white}Variety${CH.reset}  (vault titles: ${fmt.int(s.totals.varietyTitles || 0)})`);
+  for (const t of badges.VARIETY) {
+    const hit = (s.totals.varietyTitles || 0) >= t.titles;
+    plain(`  ${hit ? CH.green + "✓" : CH.dim + "·"}${CH.reset} ${String(t.titles).padStart(4)}  ${t.name}`);
+  }
+  const nv = badges.nextTier(badges.VARIETY, s.totals.varietyTitles || 0, "titles");
+  if (nv) info(`next variety: ${nv.name} (+${nv.titles - (s.totals.varietyTitles || 0)} titles)`);
+  line();
+  info("vault totals are local estimates — Discord may lag or differ");
+  await settle();
+}
+
+async function forgeToNextTier(ctx) {
+  if (!(await requireReady())) return;
+  const s = vault.load();
+  const catalog = filteredCatalog(ctx.games);
+  plain(`${CH.orange}1${CH.reset} game-time next  ${CH.orange}2${CH.reset} stream next  ${CH.orange}3${CH.reset} variety next`);
+  const c = await ui.ask(`  ${CH.orange}❯${CH.reset} `);
+  if (c === "1") {
+    const next = badges.nextTier(badges.GAME_TIME, s.totals.hours, "hours");
+    if (!next) {
+      pass("already max game-time tier");
+      return await settle();
+    }
+    const need = next.hours - s.totals.hours;
+    info(`need ${fmt.hours(need)} more for ${next.name}`);
+    const titles = Math.min(50, Math.max(5, Math.ceil(need / Math.max(1, s.settings.hoursDefault))));
+    const per = need / titles;
+    await executeForge(pickRotating(catalog, titles), per, "playtime");
+  } else if (c === "2") {
+    const next = badges.nextTier(badges.STREAM, s.totals.streamHours || 0, "hours");
+    if (!next) {
+      pass("already max stream tier");
+      return await settle();
+    }
+    const need = next.hours - (s.totals.streamHours || 0);
+    info(`need ${fmt.hours(need)} more for ${next.name}`);
+    const sessions = Math.min(100, Math.max(1, Math.ceil(need / 10)));
+    await executeStreamForge(pickRotating(catalog, sessions), need, sessions);
+  } else if (c === "3") {
+    const next = badges.nextTier(badges.VARIETY, s.totals.varietyTitles || 0, "titles");
+    if (!next) {
+      pass("already max variety tier");
+      return await settle();
+    }
+    const need = next.titles - (s.totals.varietyTitles || 0);
+    info(`need ${need} more titles for ${next.name}`);
+    await executeForge(pickRotating(catalog, need), 1 / 60, "variety");
+  }
+}
+
+async function profilesMenu(ctx) {
+  blank();
+  const list = vault.listProfiles();
+  const s = vault.load();
+  info(`active profile: ${CH.orange}${s.activeProfile}${CH.reset}`);
+  plain(`profiles: ${list.join(", ")}`);
+  plain(
+    `${CH.orange}1${CH.reset} switch  ${CH.orange}2${CH.reset} save as  ${CH.orange}3${CH.reset} export  ${CH.orange}4${CH.reset} import  ${CH.orange}enter${CH.reset} back`
+  );
+  const c = await ui.ask(`  ${CH.orange}❯${CH.reset} `);
+  if (c === "1") {
+    const name = await ui.ask(`  ${CH.dim}profile name:${CH.reset} `);
+    if (name) {
+      vault.switchProfile(name);
+      pass(`switched to ${name}`);
+      try {
+        await session.begin();
+        if (!vault.tokenFresh()) await session.renew();
+      } catch (e) {
+        warn(String(e.message || e));
+      }
+    }
+  } else if (c === "2") {
+    const name = await ui.ask(`  ${CH.dim}save as:${CH.reset} `);
+    if (name) {
+      vault.saveProfile(name);
+      pass(`saved profile ${name}`);
+    }
+  } else if (c === "3") {
+    const redact = await ui.confirm(`  ${CH.dim}redact secrets?`);
+    const data = vault.exportVault({ redact });
+    const out = PATHS.vault.replace("vault.json", `vault-export-${Date.now()}.json`);
+    fs.writeFileSync(out, JSON.stringify(data, null, 2));
+    pass(`exported → ${out}`);
+  } else if (c === "4") {
+    const p = await ui.ask(`  ${CH.dim}path to json:${CH.reset} `);
+    if (p && fs.existsSync(p)) {
+      try {
+        vault.importVault(JSON.parse(fs.readFileSync(p, "utf-8")));
+        pass("imported");
+      } catch (e) {
+        fail(String(e.message || e));
+      }
+    } else fail("file not found");
+  }
+  await settle();
+}
+
+async function resumeCheckpoint(ctx) {
+  const cp = checkpoint.load();
+  if (!cp) {
+    info("no checkpoint to resume");
+    return await settle();
+  }
+  info(`checkpoint: mode=${cp.mode} index=${cp.index}/${cp.total} at ${cp.at}`);
+  if (!(await ui.confirm(`  ${CH.dim}clear checkpoint instead of resume?`))) {
+    info("re-run the same forge mode — it will auto-resume from checkpoint");
+  } else {
+    checkpoint.clear();
+    pass("checkpoint cleared");
+  }
   await settle();
 }
 
@@ -306,43 +381,32 @@ async function bindFingerprint(ctx) {
     fail("set a valid token first");
     return await settle();
   }
-
   if (process.platform !== "win32") {
-    info(`binding synthetic fingerprint for ${CH.orange}${process.platform}${CH.reset} (account ${uid})`);
     try {
       const fp = auth.syntheticFingerprint(uid);
       s.fingerprint = fp;
       vault.save();
-      pass(`fingerprint bound ${CH.dim}${BULLET}${CH.reset} ${fp.length} chars (synthetic)`);
+      pass(`fingerprint bound · ${fp.length} chars (synthetic)`);
     } catch (e) {
-      fail(String(e && e.message ? e.message : e));
+      fail(String(e.message || e));
     }
     return await settle();
   }
-
-  info(`bind an executable_fingerprint to account ${CH.orange}${uid}${CH.reset}`);
-  info("point it at any game .exe (or a running game's pid)");
   let target = await ui.ask(`  ${CH.dim}exe path or pid:${CH.reset} `);
   target = target.replace(/^"|"$/g, "");
-  if (!target) {
-    info("cancelled");
-    return await settle();
-  }
-
+  if (!target) return await settle();
   const pid = /^\d+$/.test(target) ? parseInt(target, 10) : 0;
   if (!pid && !fs.existsSync(target)) {
     fail(`file not found: ${target}`);
     return await settle();
   }
-
-  info("generating...");
   try {
     const fp = await auth.generateFingerprint(uid, pid ? "" : target, pid);
     s.fingerprint = fp;
     vault.save();
-    pass(`fingerprint bound ${CH.dim}${BULLET}${CH.reset} ${fp.length} chars, stored in vault`);
+    pass(`fingerprint bound · ${fp.length} chars`);
   } catch (e) {
-    fail(String(e && e.message ? e.message : e));
+    fail(String(e.message || e));
   }
   await settle();
 }
@@ -350,36 +414,25 @@ async function bindFingerprint(ctx) {
 async function probeStats(ctx) {
   const s = vault.load();
   if (!s.token) {
-    fail("no token in vault");
+    fail("no token");
     return await settle();
   }
-  info("asking discord what it thinks...");
   try {
-    const res = await fetch("https://discord.com/api/v9/users/@me", {
-      headers: auth.buildHeaders(),
-    });
+    const res = await fetch("https://discord.com/api/v9/users/@me", { headers: auth.buildHeaders() });
     if (!res.ok) throw new Error(`http ${res.status}`);
     const me = await res.json();
     blank();
-    keyValue(
-      "username",
-      `${me.username}${me.discriminator && me.discriminator !== "0" ? `#${me.discriminator}` : ""}`
-    );
+    keyValue("profile", s.activeProfile);
+    keyValue("username", me.username);
     keyValue("user id", me.id);
-    keyValue("locale", me.locale || "n/a");
-    keyValue("verified", String(me.verified));
-    if (me.premium_type) keyValue("nitro tier", String(me.premium_type));
-    blank();
-    info("local vault totals:");
-    keyValue("titles forged (lifetime)", fmt.int(s.totals.titles));
-    keyValue("hours forged (lifetime)", fmt.hours(s.totals.hours));
-    keyValue("forge runs", fmt.int(s.totals.runs));
-    if (s.lastRun)
-      keyValue("last run", `${s.lastRun.ok} titles ${CH.dim}${CH.reset}\u00b7 ${fmt.ago(s.lastRun.at)}`);
-    blank();
-    info("badges: game-time (hours) · variety (5+ titles) · streaming (hours streamed to others)");
+    keyValue("playtime hours (vault)", fmt.hours(s.totals.hours));
+    keyValue("stream hours (vault)", fmt.hours(s.totals.streamHours || 0));
+    keyValue("variety titles (vault)", fmt.int(s.totals.varietyTitles || 0));
+    keyValue("runs", fmt.int(s.totals.runs));
+    keyValue("pace", s.settings.pace);
+    keyValue("filter", s.settings.catalogFilter);
   } catch (e) {
-    fail(String(e && e.message ? e.message : e));
+    fail(String(e.message || e));
   }
   await settle();
 }
@@ -390,37 +443,37 @@ async function renewSession(ctx) {
     const c = await ui.ask(`  ${CH.dim}cookie header:${CH.reset} `);
     if (c) {
       s.cookie = c;
-      pass("cookie updated");
+      vault.save();
       envstore.sync({ cookie: c });
-    } else info("cookie unchanged");
+      pass("cookie updated");
+    }
   }
-  info("re-minting analytics token...");
   try {
     s.mintedAt = 0;
     vault.save();
     await session.renew();
     pass("session renewed");
   } catch (e) {
-    fail(String(e && e.message ? e.message : e));
+    fail(String(e.message || e));
   }
   await settle();
 }
 
 async function catalogScan(ctx) {
-  const { games: catalog } = ctx;
+  const catalog = filteredCatalog(ctx.games);
   const q = await ui.ask(`  ${CH.dim}search catalog:${CH.reset} `);
   const matches = games.searchGames(catalog, q);
-  blank();
   if (!matches.length) {
     fail("no matches");
     return await settle();
   }
-  info(`${matches.length} shown (cap 25)`);
+  info(`${matches.length} shown`);
   line();
   for (const g of matches) {
     const used = vault.load().recentIds.includes(g.id);
-    const flag = used ? `${CH.green}forged${CH.reset}` : `${CH.dim}untouched${CH.reset}`;
-    plain(`${CH.orange}${g.name.slice(0, 34).padEnd(34)}${CH.reset} ${CH.dim}<${g.id}>${CH.reset} ${flag}`);
+    plain(
+      `${CH.orange}${g.name.slice(0, 34).padEnd(34)}${CH.reset} ${CH.dim}<${g.id}>${CH.reset} ${used ? CH.green + "forged" : CH.dim + "untouched"}${CH.reset}`
+    );
   }
   line();
   await settle();
@@ -432,45 +485,57 @@ async function editSettings(ctx) {
   while (!done) {
     blank();
     line();
-    keyValue("batch size", `${s.settings.batchSize} titles/request`);
+    keyValue("batch size", String(s.settings.batchSize));
     keyValue("batch pause", `${s.settings.batchPauseMs} ms`);
-    keyValue("wobble", s.settings.wobble ? "on (\u00b13% hour drift)" : "off");
-    keyValue("dry run", s.settings.dryRun ? "ON (nothing is sent)" : "off");
+    keyValue("wobble", s.settings.wobble ? "on" : "off");
+    keyValue("dry run", s.settings.dryRun ? "ON" : "off");
     keyValue("default hours", String(s.settings.hoursDefault));
+    keyValue("pace", s.settings.pace);
+    keyValue("drip pause", `${Math.round((s.settings.dripPauseMs || 0) / 1000)}s`);
+    keyValue("catalog filter", s.settings.catalogFilter);
+    keyValue("max retries", String(s.settings.maxRetries));
+    keyValue("debug dump", s.settings.debugDump ? "on" : "off");
     line();
     plain(
-      `${CH.orange}1${CH.reset} batch size   ${CH.orange}2${CH.reset} pause   ${CH.orange}3${CH.reset} wobble   ${CH.orange}4${CH.reset} dry run   ${CH.orange}5${CH.reset} default hours   ${CH.orange}enter${CH.reset} back`
+      `${CH.orange}1${CH.reset} batch  ${CH.orange}2${CH.reset} pause  ${CH.orange}3${CH.reset} wobble  ${CH.orange}4${CH.reset} dry  ${CH.orange}5${CH.reset} hours`
     );
-    const c = await ui.ask(`  ${CH.orange}\u276f${CH.reset} `);
+    plain(
+      `${CH.orange}6${CH.reset} pace  ${CH.orange}7${CH.reset} filter  ${CH.orange}8${CH.reset} retries  ${CH.orange}9${CH.reset} debug  ${CH.orange}enter${CH.reset} back`
+    );
+    const c = await ui.ask(`  ${CH.orange}❯${CH.reset} `);
     if (c === "1") {
-      const v = await ui.askNumber(
-        `  ${CH.dim}new batch size${CH.reset} ${CH.dim}[${s.settings.batchSize}]:${CH.reset} `,
-        s.settings.batchSize,
-        { integer: true, min: 1 }
-      );
+      const v = await ui.askNumber(`  batch size [${s.settings.batchSize}]: `, s.settings.batchSize, {
+        integer: true,
+        min: 1,
+      });
       if (v !== null) s.settings.batchSize = v;
     } else if (c === "2") {
-      const v = await ui.askNumber(
-        `  ${CH.dim}pause in ms${CH.reset} ${CH.dim}[${s.settings.batchPauseMs}]:${CH.reset} `,
-        s.settings.batchPauseMs,
-        { min: 0 }
-      );
+      const v = await ui.askNumber(`  pause ms [${s.settings.batchPauseMs}]: `, s.settings.batchPauseMs, {
+        min: 0,
+      });
       if (v !== null) s.settings.batchPauseMs = v;
-    } else if (c === "3") {
-      s.settings.wobble = !s.settings.wobble;
-    } else if (c === "4") {
-      s.settings.dryRun = !s.settings.dryRun;
-      warn(s.settings.dryRun ? "dry run ON - nothing will be sent" : "dry run off - live sending");
-    } else if (c === "5") {
-      const v = await ui.askNumber(
-        `  ${CH.dim}default hours${CH.reset} ${CH.dim}[${s.settings.hoursDefault}]:${CH.reset} `,
-        s.settings.hoursDefault,
-        { min: 0 }
-      );
+    } else if (c === "3") s.settings.wobble = !s.settings.wobble;
+    else if (c === "4") s.settings.dryRun = !s.settings.dryRun;
+    else if (c === "5") {
+      const v = await ui.askNumber(`  default hours [${s.settings.hoursDefault}]: `, s.settings.hoursDefault, {
+        min: 0,
+      });
       if (v !== null) s.settings.hoursDefault = v;
-    } else {
-      done = true;
-    }
+    } else if (c === "6") {
+      s.settings.pace = s.settings.pace === "drip" ? "aggressive" : "drip";
+      info(`pace → ${s.settings.pace}`);
+    } else if (c === "7") {
+      plain("all | verified | steam | no-launcher");
+      const f = await ui.ask(`  filter [${s.settings.catalogFilter}]: `);
+      if (f) s.settings.catalogFilter = f.toLowerCase();
+    } else if (c === "8") {
+      const v = await ui.askNumber(`  max retries [${s.settings.maxRetries}]: `, s.settings.maxRetries, {
+        integer: true,
+        min: 0,
+      });
+      if (v !== null) s.settings.maxRetries = v;
+    } else if (c === "9") s.settings.debugDump = !s.settings.debugDump;
+    else done = true;
     vault.save();
   }
 }
@@ -478,35 +543,18 @@ async function editSettings(ctx) {
 async function showJournal(ctx) {
   blank();
   line();
-  let rows = [];
-  try {
-    if (fs.existsSync(PATHS.journal)) {
-      rows = fs
-        .readFileSync(PATHS.journal, "utf-8")
-        .split("\n")
-        .filter(Boolean)
-        .slice(-LIMITS.journalTail)
-        .map((l) => {
-          try {
-            return JSON.parse(l);
-          } catch (_) {
-            return null;
-          }
-        })
-        .filter(Boolean);
-    }
-  } catch (_) {
-    rows = [];
-  }
-  if (!rows.length) {
-    info("journal is empty - run a forge first");
+  const stats = forge.journalStats();
+  if (!stats.total) {
+    info("journal empty");
   } else {
-    info(`last ${rows.length} runs`);
+    info(`${stats.total} runs · ${fmt.hours(stats.hours)} claimed · ok=${stats.ok} fail=${stats.fail}`);
+    for (const [m, v] of Object.entries(stats.byMode)) {
+      plain(`  ${m.padEnd(12)} runs=${v.runs} ok=${v.ok} fail=${v.fail} hours=${fmt.hours(v.hours)}`);
+    }
     line();
-    for (const r of rows.reverse()) {
-      const mode = r.mode === "dry" ? `${CH.yellow}dry${CH.reset}` : `${CH.green}live${CH.reset}`;
+    for (const r of stats.rows.slice(-LIMITS.journalTail).reverse()) {
       plain(
-        `${CH.dim}${fmt.ago(r.ts).padStart(9)}${CH.reset}  ${mode}  ${String(r.ok).padStart(4)} ok  ${String(r.failed).padStart(3)} fail  ${fmt.hours(r.totalHours)} `
+        `${CH.dim}${fmt.ago(r.ts).padStart(9)}${CH.reset}  ${(r.mode || "?").padEnd(8)}  ok=${r.ok} fail=${r.failed}  ${fmt.hours(r.totalHours || 0)}`
       );
     }
   }
@@ -515,12 +563,17 @@ async function showJournal(ctx) {
 }
 
 async function toolsSubmenu(ctx) {
-  plain(`${CH.orange}a${CH.reset} probe stats   ${CH.orange}b${CH.reset} catalog scan   ${CH.orange}c${CH.reset} settings   ${CH.orange}d${CH.reset} journal   ${CH.orange}enter${CH.reset} back`);
-  const c = (await ui.ask(`  ${CH.orange}\u276f${CH.reset} `)).toLowerCase();
+  plain(
+    `${CH.orange}a${CH.reset} probe  ${CH.orange}b${CH.reset} catalog  ${CH.orange}c${CH.reset} settings  ${CH.orange}d${CH.reset} journal  ${CH.orange}e${CH.reset} ladder  ${CH.orange}f${CH.reset} profiles  ${CH.orange}g${CH.reset} checkpoint  ${CH.orange}enter${CH.reset} back`
+  );
+  const c = (await ui.ask(`  ${CH.orange}❯${CH.reset} `)).toLowerCase();
   if (c === "a") await probeStats(ctx);
   else if (c === "b") await catalogScan(ctx);
   else if (c === "c") await editSettings(ctx);
   else if (c === "d") await showJournal(ctx);
+  else if (c === "e") await showLadder(ctx);
+  else if (c === "f") await profilesMenu(ctx);
+  else if (c === "g") await resumeCheckpoint(ctx);
 }
 
 function pickRotating(catalog, count) {
@@ -539,15 +592,15 @@ function pickRotating(catalog, count) {
 async function requireReady() {
   const s = vault.load();
   if (!s.token || !s.cookie) {
-    fail("token/cookie missing - use menu 6 to set them");
+    fail("token/cookie missing — menu 6 or profiles");
     return false;
   }
   if (!vault.tokenFresh()) {
-    info("analytics token stale, re-minting...");
+    info("analytics token stale, re-minting…");
     try {
       await session.renew();
     } catch (e) {
-      fail(String(e && e.message ? e.message : e));
+      fail(String(e.message || e));
       return false;
     }
   }
@@ -560,6 +613,10 @@ module.exports = {
   forgeStream,
   forgeVariety,
   forgeAll,
+  forgeToNextTier,
+  showLadder,
+  profilesMenu,
+  resumeCheckpoint,
   bindFingerprint,
   probeStats,
   renewSession,
@@ -571,4 +628,5 @@ module.exports = {
   pickRotating,
   executeForge,
   executeStreamForge,
+  filteredCatalog,
 };
