@@ -5,7 +5,7 @@
  */
 
 const readline = require("readline/promises");
-const { CH, line, blank, plain, info, dim } = require("./log");
+const { CH, line, blank, plain, info } = require("./log");
 const { ORCA } = require("./banner");
 const { LIMITS } = require("./config");
 const vault = require("./vault");
@@ -105,7 +105,7 @@ function paintMenu() {
 
   blank();
   section("TOOLS");
-  opt("0", "tools…", "probe · catalog · settings · journal · profiles · checkpoint");
+  opt("10", "tools…", "probe · catalog · settings · journal · profiles · checkpoint");
   opt("x", "exit", "quit");
 
   line();
@@ -146,7 +146,8 @@ async function showMenu(ctx) {
     case "9":
       await actions.bindFingerprint(ctx);
       break;
-    case "0":
+    case "10":
+    case "0": // keep 0 as alias
       await actions.toolsSubmenu(ctx);
       break;
     case "x":
@@ -154,7 +155,7 @@ async function showMenu(ctx) {
     case "":
       return false;
     default:
-      info(`unknown option ${CH.dim}${choice}${CH.reset} — use 0–9 or x`);
+      info(`unknown option ${CH.dim}${choice}${CH.reset} — use 1–10 or x`);
   }
   return true;
 }
