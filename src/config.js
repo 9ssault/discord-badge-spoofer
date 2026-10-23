@@ -1,10 +1,5 @@
 "use strict";
 
-/**
- * static knobs for the forge. paths, endpoints, client identity, defaults.
- * Termux / Linux / Windows safe.
- */
-
 const path = require("path");
 
 const ROOT = path.join(__dirname, "..");
@@ -14,7 +9,9 @@ const PATHS = {
   legacyVault: path.join(ROOT, "science_state.json"),
   journal: path.join(ROOT, "journal.jsonl"),
   envFile: path.join(ROOT, ".env"),
-  gameList: path.join(ROOT, "data", "games.json"), // fixed: inside repo
+  gameList: path.join(ROOT, "data", "games.json"),
+  debugDir: path.join(ROOT, "debug"),
+  profilesDir: path.join(ROOT, "profiles"),
 };
 
 const ENDPOINTS = {
@@ -26,8 +23,10 @@ const ENDPOINTS = {
 
 const LIMITS = {
   tokenTTL: 12 * 60 * 60 * 1000,
-  journalTail: 15,
+  journalTail: 30,
   replayMemory: 800,
+  maxRetries: 4,
+  retryBaseMs: 800,
 };
 
 const CLIENT = {
@@ -50,6 +49,21 @@ const DEFAULT_SETTINGS = {
   wobble: true,
   dryRun: false,
   hoursDefault: 1,
+  pace: "aggressive", // aggressive | drip
+  dripHoursPerDay: 4,
+  dripPauseMs: 15 * 60 * 1000,
+  catalogFilter: "all", // all | verified | steam | no-launcher
+  maxRetries: 4,
+  debugDump: false,
 };
 
-module.exports = { PATHS, ENDPOINTS, LIMITS, CLIENT, DEFAULT_SETTINGS };
+const PRESETS = {
+  "max-variety": { mode: "variety", titles: 100, hours: 1 / 60 },
+  "next-tier-play": { mode: "playtime", targetLadder: "playtime" },
+  "next-tier-stream": { mode: "stream", targetLadder: "stream" },
+  "quick-play": { mode: "playtime", titles: 20, hours: 1 },
+  "dump-play": { mode: "playtime", titles: 50, hours: 10 },
+  "dump-stream": { mode: "stream", hours: 50 },
+};
+
+module.exports = { PATHS, ENDPOINTS, LIMITS, CLIENT, DEFAULT_SETTINGS, PRESETS };
