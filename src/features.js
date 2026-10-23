@@ -3,7 +3,7 @@
 const fs = require("fs");
 const { CH, BULLET, info, pass, fail, warn, line, blank, plain, keyValue } = require("./log");
 const { ORCA } = require("./banner");
-const { LIMITS, PATHS, PRESETS } = require("./config");
+const { LIMITS, PATHS } = require("./config");
 const vault = require("./vault");
 const fmt = require("./format");
 const ui = require("./ui");
@@ -37,7 +37,9 @@ async function forgeBulk(ctx) {
   if (!(await requireReady())) return;
   const catalog = filteredCatalog(ctx.games);
   const s = vault.load();
-  info(`catalog ${CH.dim}${BULLET}${CH.reset} ${CH.orange}${catalog.length}${CH.reset} titles (filter=${s.settings.catalogFilter})`);
+  blank();
+  ui.section("PLAYTIME FORGE");
+  info(`catalog ${CH.orange}${catalog.length}${CH.reset} titles · filter=${s.settings.catalogFilter} · pace=${s.settings.pace}`);
   const count = await ui.askNumber(`  ${CH.dim}titles this run${CH.reset} ${CH.dim}[all]:${CH.reset} `, catalog.length, {
     integer: true,
     min: 1,
@@ -66,6 +68,8 @@ async function forgeTitles(ctx) {
   if (!(await requireReady())) return;
   const catalog = filteredCatalog(ctx.games);
   const s = vault.load();
+  blank();
+  ui.section("FORGE ON TITLES");
   const q = await ui.ask(`  ${CH.dim}search titles:${CH.reset} `);
   const matches = games.searchGames(catalog, q);
   if (!matches.length) {
@@ -92,8 +96,10 @@ async function forgeTitles(ctx) {
 async function forgeStream(ctx) {
   if (!(await requireReady())) return;
   const catalog = filteredCatalog(ctx.games);
-  info("streaming badge — pure science forge");
-  info(`${CH.dim}optional real Go Live is not bundled (see README)${CH.reset}`);
+  blank();
+  ui.section("STREAM FORGE");
+  info("pure science · video_stream_started / ended");
+  info(`${CH.dim}Discord may still require a real viewer for the badge${CH.reset}`);
   const hoursIn = await ui.askNumber(`  ${CH.dim}total stream hours${CH.reset} ${CH.dim}[50]:${CH.reset} `, 50, {
     min: 0.1,
   });
@@ -103,7 +109,7 @@ async function forgeStream(ctx) {
   }
   const defaultSessions = Math.min(100, Math.max(1, Math.ceil(hoursIn / 10)));
   const sessions = await ui.askNumber(
-    `  ${CH.dim}sessions${CH.reset} ${CH.dim}[${defaultSessions}]:${CH.reset} `,
+    `  ${CH.dim}sessions (~10h each default)${CH.reset} ${CH.dim}[${defaultSessions}]:${CH.reset} `,
     defaultSessions,
     { integer: true, min: 1 }
   );
@@ -126,9 +132,8 @@ async function executeStreamForge(picked, totalHours, sessions) {
   const events = built.events;
   info(
     `forging stream ${CH.orange}${fmt.hours(totalHours)}${CH.reset} × ${CH.orange}${built.sessions}${CH.reset} sessions` +
-      ` ${CH.dim}(~${fmt.hours(built.hoursEach)} each)${CH.reset}` +
-      `${s.settings.dryRun ? ` ${CH.yellow}(dry)${CH.reset}` : ""}` +
-      ` ${CH.dim}pace=${s.settings.pace}${CH.reset}`
+      ` ${CH.dim}(~${fmt.hours(built.hoursEach)} each · pace=${s.settings.pace})${CH.reset}` +
+      `${s.settings.dryRun ? ` ${CH.yellow}(dry)${CH.reset}` : ""}`
   );
   line();
   const cp = checkpoint.load();
@@ -158,6 +163,9 @@ async function executeStreamForge(picked, totalHours, sessions) {
 async function forgeVariety(ctx) {
   if (!(await requireReady())) return;
   const catalog = filteredCatalog(ctx.games);
+  blank();
+  ui.section("VARIETY FORGE");
+  info("marks many titles as played (~1 min each)");
   const count = await ui.askNumber(`  ${CH.dim}how many titles${CH.reset} ${CH.dim}[100]:${CH.reset} `, 100, {
     integer: true,
     min: 1,
@@ -178,6 +186,8 @@ async function forgeAll(ctx) {
   if (!(await requireReady())) return;
   const s = vault.load();
   const catalog = filteredCatalog(ctx.games);
+  blank();
+  ui.section("ALL BADGES");
   const hours = await ui.askNumber(
     `  ${CH.dim}playtime hours/title${CH.reset} ${CH.dim}[${s.settings.hoursDefault}]:${CH.reset} `,
     s.settings.hoursDefault
@@ -242,32 +252,36 @@ async function executeForge(picked, hoursEach, mode = "playtime") {
 async function showLadder(ctx) {
   const s = vault.load();
   blank();
-  line();
-  plain(`${CH.white}Game time${CH.reset}  (vault hours: ${fmt.hours(s.totals.hours)})`);
+  ui.section("BADGE LADDER");
+  plain(`${CH.white}Game time${CH.reset}  ${CH.dim}(vault ${fmt.hours(s.totals.hours)})${CH.reset}`);
   for (const t of badges.GAME_TIME) {
     const hit = s.totals.hours >= t.hours;
     plain(`  ${hit ? CH.green + "✓" : CH.dim + "·"}${CH.reset} ${String(t.hours).padStart(5)}h  ${t.name}`);
   }
   const ng = badges.nextTier(badges.GAME_TIME, s.totals.hours, "hours");
-  if (ng) info(`next game-time: ${ng.name} (+${fmt.hours(ng.hours - s.totals.hours)})`);
+  if (ng) info(`next → ${ng.name} (+${fmt.hours(ng.hours - s.totals.hours)})`);
+  else pass("max game-time tier");
   blank();
-  plain(`${CH.white}Streaming${CH.reset}  (vault: ${fmt.hours(s.totals.streamHours || 0)})`);
+  plain(`${CH.white}Streaming${CH.reset}  ${CH.dim}(vault ${fmt.hours(s.totals.streamHours || 0)})${CH.reset}`);
   for (const t of badges.STREAM) {
     const hit = (s.totals.streamHours || 0) >= t.hours;
     plain(`  ${hit ? CH.green + "✓" : CH.dim + "·"}${CH.reset} ${String(t.hours).padStart(5)}h  ${t.name}`);
   }
   const ns = badges.nextTier(badges.STREAM, s.totals.streamHours || 0, "hours");
-  if (ns) info(`next stream: ${ns.name} (+${fmt.hours(ns.hours - (s.totals.streamHours || 0))})`);
+  if (ns) info(`next → ${ns.name} (+${fmt.hours(ns.hours - (s.totals.streamHours || 0))})`);
+  else pass("max stream tier");
   blank();
-  plain(`${CH.white}Variety${CH.reset}  (vault titles: ${fmt.int(s.totals.varietyTitles || 0)})`);
+  plain(`${CH.white}Variety${CH.reset}  ${CH.dim}(vault ${fmt.int(s.totals.varietyTitles || 0)} titles)${CH.reset}`);
   for (const t of badges.VARIETY) {
     const hit = (s.totals.varietyTitles || 0) >= t.titles;
     plain(`  ${hit ? CH.green + "✓" : CH.dim + "·"}${CH.reset} ${String(t.titles).padStart(4)}  ${t.name}`);
   }
   const nv = badges.nextTier(badges.VARIETY, s.totals.varietyTitles || 0, "titles");
-  if (nv) info(`next variety: ${nv.name} (+${nv.titles - (s.totals.varietyTitles || 0)} titles)`);
+  if (nv) info(`next → ${nv.name} (+${nv.titles - (s.totals.varietyTitles || 0)} titles)`);
+  else pass("max variety tier");
   line();
   info("vault totals are local estimates — Discord may lag or differ");
+  plain(`${CH.dim}menu 6 = forge the gap to the next tier automatically${CH.reset}`);
   await settle();
 }
 
@@ -275,7 +289,11 @@ async function forgeToNextTier(ctx) {
   if (!(await requireReady())) return;
   const s = vault.load();
   const catalog = filteredCatalog(ctx.games);
-  plain(`${CH.orange}1${CH.reset} game-time next  ${CH.orange}2${CH.reset} stream next  ${CH.orange}3${CH.reset} variety next`);
+  blank();
+  ui.section("FORGE TO NEXT TIER");
+  plain(`${CH.orange}1${CH.reset} game-time next`);
+  plain(`${CH.orange}2${CH.reset} stream next`);
+  plain(`${CH.orange}3${CH.reset} variety next`);
   const c = await ui.ask(`  ${CH.orange}❯${CH.reset} `);
   if (c === "1") {
     const next = badges.nextTier(badges.GAME_TIME, s.totals.hours, "hours");
@@ -312,13 +330,17 @@ async function forgeToNextTier(ctx) {
 
 async function profilesMenu(ctx) {
   blank();
+  ui.section("PROFILES");
   const list = vault.listProfiles();
   const s = vault.load();
-  info(`active profile: ${CH.orange}${s.activeProfile}${CH.reset}`);
-  plain(`profiles: ${list.join(", ")}`);
-  plain(
-    `${CH.orange}1${CH.reset} switch  ${CH.orange}2${CH.reset} save as  ${CH.orange}3${CH.reset} export  ${CH.orange}4${CH.reset} import  ${CH.orange}enter${CH.reset} back`
-  );
+  info(`active: ${CH.orange}${s.activeProfile}${CH.reset}`);
+  plain(`available: ${list.join(", ") || "(none yet)"}`);
+  blank();
+  plain(`${CH.orange}1${CH.reset} switch profile`);
+  plain(`${CH.orange}2${CH.reset} save current as…`);
+  plain(`${CH.orange}3${CH.reset} export vault`);
+  plain(`${CH.orange}4${CH.reset} import vault`);
+  plain(`${CH.dim}enter${CH.reset} back`);
   const c = await ui.ask(`  ${CH.orange}❯${CH.reset} `);
   if (c === "1") {
     const name = await ui.ask(`  ${CH.dim}profile name:${CH.reset} `);
@@ -359,15 +381,19 @@ async function profilesMenu(ctx) {
 }
 
 async function resumeCheckpoint(ctx) {
+  blank();
+  ui.section("CHECKPOINT");
   const cp = checkpoint.load();
   if (!cp) {
-    info("no checkpoint to resume");
+    info("no checkpoint — forges write one on interrupt / mid-run");
     return await settle();
   }
-  info(`checkpoint: mode=${cp.mode} index=${cp.index}/${cp.total} at ${cp.at}`);
-  if (!(await ui.confirm(`  ${CH.dim}clear checkpoint instead of resume?`))) {
-    info("re-run the same forge mode — it will auto-resume from checkpoint");
-  } else {
+  keyValue("mode", String(cp.mode));
+  keyValue("index", `${cp.index}/${cp.total}`);
+  keyValue("at", String(cp.at));
+  blank();
+  plain(`${CH.dim}Re-run the same forge mode to auto-resume.${CH.reset}`);
+  if (await ui.confirm(`  ${CH.dim}clear checkpoint?`)) {
     checkpoint.clear();
     pass("checkpoint cleared");
   }
@@ -381,12 +407,14 @@ async function bindFingerprint(ctx) {
     fail("set a valid token first");
     return await settle();
   }
+  blank();
+  ui.section("FINGERPRINT");
   if (process.platform !== "win32") {
     try {
       const fp = auth.syntheticFingerprint(uid);
       s.fingerprint = fp;
       vault.save();
-      pass(`fingerprint bound · ${fp.length} chars (synthetic)`);
+      pass(`synthetic fingerprint · ${fp.length} chars (${process.platform})`);
     } catch (e) {
       fail(String(e.message || e));
     }
@@ -417,20 +445,22 @@ async function probeStats(ctx) {
     fail("no token");
     return await settle();
   }
+  blank();
+  ui.section("PROBE");
   try {
     const res = await fetch("https://discord.com/api/v9/users/@me", { headers: auth.buildHeaders() });
     if (!res.ok) throw new Error(`http ${res.status}`);
     const me = await res.json();
-    blank();
     keyValue("profile", s.activeProfile);
     keyValue("username", me.username);
     keyValue("user id", me.id);
-    keyValue("playtime hours (vault)", fmt.hours(s.totals.hours));
-    keyValue("stream hours (vault)", fmt.hours(s.totals.streamHours || 0));
-    keyValue("variety titles (vault)", fmt.int(s.totals.varietyTitles || 0));
+    keyValue("playtime (vault)", fmt.hours(s.totals.hours));
+    keyValue("stream (vault)", fmt.hours(s.totals.streamHours || 0));
+    keyValue("variety (vault)", fmt.int(s.totals.varietyTitles || 0));
     keyValue("runs", fmt.int(s.totals.runs));
     keyValue("pace", s.settings.pace);
     keyValue("filter", s.settings.catalogFilter);
+    keyValue("dry run", s.settings.dryRun ? "ON" : "off");
   } catch (e) {
     fail(String(e.message || e));
   }
@@ -438,6 +468,8 @@ async function probeStats(ctx) {
 }
 
 async function renewSession(ctx) {
+  blank();
+  ui.section("RENEW SESSION");
   const s = vault.load();
   if (await ui.confirm(`  ${CH.dim}paste a fresh cf_clearance cookie?`)) {
     const c = await ui.ask(`  ${CH.dim}cookie header:${CH.reset} `);
@@ -460,14 +492,16 @@ async function renewSession(ctx) {
 }
 
 async function catalogScan(ctx) {
+  blank();
+  ui.section("CATALOG");
   const catalog = filteredCatalog(ctx.games);
-  const q = await ui.ask(`  ${CH.dim}search catalog:${CH.reset} `);
+  info(`${catalog.length} titles after filter=${vault.load().settings.catalogFilter}`);
+  const q = await ui.ask(`  ${CH.dim}search:${CH.reset} `);
   const matches = games.searchGames(catalog, q);
   if (!matches.length) {
     fail("no matches");
     return await settle();
   }
-  info(`${matches.length} shown`);
   line();
   for (const g of matches) {
     const used = vault.load().recentIds.includes(g.id);
@@ -484,10 +518,10 @@ async function editSettings(ctx) {
   let done = false;
   while (!done) {
     blank();
-    line();
+    ui.section("SETTINGS");
     keyValue("batch size", String(s.settings.batchSize));
     keyValue("batch pause", `${s.settings.batchPauseMs} ms`);
-    keyValue("wobble", s.settings.wobble ? "on" : "off");
+    keyValue("wobble", s.settings.wobble ? "on (±3%)" : "off");
     keyValue("dry run", s.settings.dryRun ? "ON" : "off");
     keyValue("default hours", String(s.settings.hoursDefault));
     keyValue("pace", s.settings.pace);
@@ -496,12 +530,8 @@ async function editSettings(ctx) {
     keyValue("max retries", String(s.settings.maxRetries));
     keyValue("debug dump", s.settings.debugDump ? "on" : "off");
     line();
-    plain(
-      `${CH.orange}1${CH.reset} batch  ${CH.orange}2${CH.reset} pause  ${CH.orange}3${CH.reset} wobble  ${CH.orange}4${CH.reset} dry  ${CH.orange}5${CH.reset} hours`
-    );
-    plain(
-      `${CH.orange}6${CH.reset} pace  ${CH.orange}7${CH.reset} filter  ${CH.orange}8${CH.reset} retries  ${CH.orange}9${CH.reset} debug  ${CH.orange}enter${CH.reset} back`
-    );
+    plain(`${CH.orange}1${CH.reset} batch size   ${CH.orange}2${CH.reset} pause ms   ${CH.orange}3${CH.reset} wobble   ${CH.orange}4${CH.reset} dry run   ${CH.orange}5${CH.reset} hours`);
+    plain(`${CH.orange}6${CH.reset} pace toggle  ${CH.orange}7${CH.reset} filter   ${CH.orange}8${CH.reset} retries  ${CH.orange}9${CH.reset} debug    ${CH.dim}enter${CH.reset} back`);
     const c = await ui.ask(`  ${CH.orange}❯${CH.reset} `);
     if (c === "1") {
       const v = await ui.askNumber(`  batch size [${s.settings.batchSize}]: `, s.settings.batchSize, {
@@ -515,8 +545,10 @@ async function editSettings(ctx) {
       });
       if (v !== null) s.settings.batchPauseMs = v;
     } else if (c === "3") s.settings.wobble = !s.settings.wobble;
-    else if (c === "4") s.settings.dryRun = !s.settings.dryRun;
-    else if (c === "5") {
+    else if (c === "4") {
+      s.settings.dryRun = !s.settings.dryRun;
+      warn(s.settings.dryRun ? "dry run ON" : "dry run off");
+    } else if (c === "5") {
       const v = await ui.askNumber(`  default hours [${s.settings.hoursDefault}]: `, s.settings.hoursDefault, {
         min: 0,
       });
@@ -525,7 +557,7 @@ async function editSettings(ctx) {
       s.settings.pace = s.settings.pace === "drip" ? "aggressive" : "drip";
       info(`pace → ${s.settings.pace}`);
     } else if (c === "7") {
-      plain("all | verified | steam | no-launcher");
+      plain(`${CH.dim}all | verified | steam | no-launcher${CH.reset}`);
       const f = await ui.ask(`  filter [${s.settings.catalogFilter}]: `);
       if (f) s.settings.catalogFilter = f.toLowerCase();
     } else if (c === "8") {
@@ -542,10 +574,10 @@ async function editSettings(ctx) {
 
 async function showJournal(ctx) {
   blank();
-  line();
+  ui.section("JOURNAL");
   const stats = forge.journalStats();
   if (!stats.total) {
-    info("journal empty");
+    info("journal empty — run a forge first");
   } else {
     info(`${stats.total} runs · ${fmt.hours(stats.hours)} claimed · ok=${stats.ok} fail=${stats.fail}`);
     for (const [m, v] of Object.entries(stats.byMode)) {
@@ -563,9 +595,16 @@ async function showJournal(ctx) {
 }
 
 async function toolsSubmenu(ctx) {
-  plain(
-    `${CH.orange}a${CH.reset} probe  ${CH.orange}b${CH.reset} catalog  ${CH.orange}c${CH.reset} settings  ${CH.orange}d${CH.reset} journal  ${CH.orange}e${CH.reset} ladder  ${CH.orange}f${CH.reset} profiles  ${CH.orange}g${CH.reset} checkpoint  ${CH.orange}enter${CH.reset} back`
-  );
+  blank();
+  ui.section("TOOLS");
+  plain(`${CH.orange}a${CH.reset}  probe stats          account + vault totals`);
+  plain(`${CH.orange}b${CH.reset}  catalog scan         search detectables`);
+  plain(`${CH.orange}c${CH.reset}  settings             batch · pace · filter · dry`);
+  plain(`${CH.orange}d${CH.reset}  journal              run history + rates`);
+  plain(`${CH.orange}e${CH.reset}  badge ladder         tiers + next gap`);
+  plain(`${CH.orange}f${CH.reset}  profiles             multi-account · export`);
+  plain(`${CH.orange}g${CH.reset}  checkpoint          resume / clear`);
+  plain(`${CH.dim}enter${CH.reset} back`);
   const c = (await ui.ask(`  ${CH.orange}❯${CH.reset} `)).toLowerCase();
   if (c === "a") await probeStats(ctx);
   else if (c === "b") await catalogScan(ctx);
@@ -592,7 +631,7 @@ function pickRotating(catalog, count) {
 async function requireReady() {
   const s = vault.load();
   if (!s.token || !s.cookie) {
-    fail("token/cookie missing — menu 6 or profiles");
+    fail("token/cookie missing — menu 8 or profiles");
     return false;
   }
   if (!vault.tokenFresh()) {
