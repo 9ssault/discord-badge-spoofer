@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
-# Discord Badge Spoofer — one-shot setup for Termux / Linux / macOS
+# Badges Spoofer — one-shot setup for Termux / Linux / macOS
 set -euo pipefail
 cd "$(dirname "$0")"
 
 echo
 echo "  ============================================================"
-echo "     DISCORD BADGE SPOOFER  —  SETUP (Termux / Linux)"
+echo "     BADGES SPOOFER  —  SETUP (Termux / Linux / macOS)"
 echo "  ============================================================"
 echo
 
-# Detect Termux
 IS_TERMUX=0
 if [ -n "${PREFIX:-}" ] && [ -d "$PREFIX/bin" ] && command -v termux-info >/dev/null 2>&1; then
   IS_TERMUX=1
@@ -19,11 +18,9 @@ fi
 
 ensure_node() {
   if command -v node >/dev/null 2>&1; then
-    local ver
+    local ver major
     ver=$(node -v 2>/dev/null || echo "?")
     echo "  [+] Node.js found: $ver"
-    # need >= 18
-    local major
     major=$(node -p "process.versions.node.split('.')[0]" 2>/dev/null || echo 0)
     if [ "$major" -ge 18 ] 2>/dev/null; then
       return 0
@@ -39,7 +36,6 @@ ensure_node() {
   elif command -v apt-get >/dev/null 2>&1; then
     sudo apt-get update -y
     sudo apt-get install -y nodejs npm || true
-    # fallback: nodesource if still missing
     if ! command -v node >/dev/null 2>&1; then
       curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
       sudo apt-get install -y nodejs
@@ -47,7 +43,7 @@ ensure_node() {
   elif command -v brew >/dev/null 2>&1; then
     brew install node
   else
-    echo "  [!] Install Node.js 18+ manually, then re-run this script."
+    echo "  [!] Install Node.js 18+ manually, then re-run."
     exit 1
   fi
 
@@ -61,30 +57,28 @@ ensure_node() {
 ensure_node
 
 echo
-echo "  [*] Installing deps (zero runtime deps — npm install is a no-op)..."
+echo "  [*] Zero runtime deps — skipping heavy npm install"
 npm install --omit=dev 2>/dev/null || true
-
-# Make data dir for catalog cache
-mkdir -p data
+mkdir -p data profiles debug
 
 echo
 echo "  ============================================================"
 echo "     READY"
 echo "  ============================================================"
 echo
-echo "  Interactive:   node index.js"
-echo "  Fully auto:    node index.js --auto --hours 1 --titles 30"
+echo "  Interactive:    node index.js"
+echo "  Auto all:       node index.js --auto --mode all --hours 2 --titles 40"
+echo "  Next tier:      node index.js --auto --mode next"
+echo "  Drip pace:      node index.js --auto --mode playtime --pace drip"
+echo "  Target hours:   node index.js --auto --mode playtime --target 500"
+echo "  Preset:         node index.js --auto --preset max-variety"
+echo "  Profile:        node index.js --profile alt"
 echo
-echo "  Optional env (skip prompts after first run):"
-echo "    export DISCORD_TOKEN='your_token'"
-echo "    export CF_CLEARANCE_COOKIE='your_cf_clearance'"
-echo "    export SPOOF_HOURS=1"
-echo "    export SPOOF_TITLES=50"
+echo "  Update later:   git pull --ff-only   (keeps vault.json / profiles)"
 echo
-echo "  Press Ctrl+C to stop at any time."
+echo "  Env (optional): DISCORD_TOKEN  CF_CLEARANCE_COOKIE  SPOOF_HOURS  SPOOF_TITLES"
 echo
 
-# If token already in vault or env, jump straight in; otherwise interactive
 if [ -f vault.json ] || [ -n "${DISCORD_TOKEN:-}" ]; then
   exec node index.js "$@"
 else

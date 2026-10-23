@@ -1,11 +1,17 @@
 "use strict";
 
+/**
+ * Interactive terminal UI — banner, status strip, sectioned menu, prompts.
+ */
+
 const readline = require("readline/promises");
-const { CH, line, blank, plain, info } = require("./log");
+const { CH, line, blank, plain, info, dim } = require("./log");
 const { ORCA } = require("./banner");
 const { LIMITS } = require("./config");
 const vault = require("./vault");
 const fmt = require("./format");
+const checkpoint = require("./checkpoint");
+
 let rl = null;
 
 function getRl() {
@@ -27,48 +33,90 @@ function closeRl() {
   }
 }
 
+function section(title) {
+  plain(`${CH.dim}── ${CH.reset}${CH.white}${title}${CH.reset} ${CH.dim}${"─".repeat(Math.max(4, 36 - title.length))}${CH.reset}`);
+}
+
+function opt(key, name, desc) {
+  plain(
+    `  ${CH.orange}${String(key).padEnd(3)}${CH.reset}${CH.white}${name.padEnd(22)}${CH.reset}${CH.dim}${desc}${CH.reset}`
+  );
+}
+
 function paint() {
   process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
   blank();
   for (const row of ORCA.art) plain(`${CH.orange}${row}${CH.reset}`);
   plain(`${CH.dim}  ${ORCA.tagline}${CH.reset}`);
   blank();
+
   const s = vault.load();
-  const auth = s.token ? (s.cookie ? "ready" : "no cookie") : "no token";
-  const mint = s.analyticsToken && Date.now() - s.mintedAt < LIMITS.tokenTTL ? "fresh" : "stale";
+  const auth = s.token ? (s.cookie ? `${CH.green}ready${CH.reset}` : `${CH.yellow}no cookie${CH.reset}`) : `${CH.red}no token${CH.reset}`;
+  const mint =
+    s.analyticsToken && Date.now() - s.mintedAt < LIMITS.tokenTTL
+      ? `${CH.green}fresh${CH.reset}`
+      : `${CH.yellow}stale${CH.reset}`;
+  const pace = s.settings.pace === "drip" ? `${CH.cyan}drip${CH.reset}` : `${CH.orange}aggressive${CH.reset}`;
+  const cp = checkpoint.load();
+
   plain(
-    `  ${CH.dim}profile${CH.reset} ${s.activeProfile || "default"}  ${CH.dim}·${CH.reset}  ${CH.dim}auth${CH.reset} ${auth}  ${CH.dim}·${CH.reset}  ${CH.dim}session${CH.reset} ${mint}`
+    `  ${CH.dim}profile${CH.reset} ${CH.white}${s.activeProfile || "default"}${CH.reset}` +
+      `  ${CH.dim}·${CH.reset}  ${CH.dim}auth${CH.reset} ${auth}` +
+      `  ${CH.dim}·${CH.reset}  ${CH.dim}session${CH.reset} ${mint}` +
+      `  ${CH.dim}·${CH.reset}  ${CH.dim}pace${CH.reset} ${pace}`
   );
   plain(
-    `  ${CH.dim}forged${CH.reset} ${fmt.int(s.totals.titles)} titles / ${fmt.hours(s.totals.hours)} play · ${fmt.hours(s.totals.streamHours || 0)} stream · ${fmt.int(s.totals.varietyTitles || 0)} variety  ${CH.dim}pace=${s.settings.pace}${CH.reset}`
+    `  ${CH.dim}vault${CH.reset}  ${CH.white}${fmt.hours(s.totals.hours)}${CH.reset} play` +
+      `  ${CH.dim}·${CH.reset}  ${CH.white}${fmt.hours(s.totals.streamHours || 0)}${CH.reset} stream` +
+      `  ${CH.dim}·${CH.reset}  ${CH.white}${fmt.int(s.totals.varietyTitles || 0)}${CH.reset} variety` +
+      `  ${CH.dim}·${CH.reset}  ${CH.white}${fmt.int(s.totals.runs)}${CH.reset} runs`
   );
+  if (s.settings.dryRun) plain(`  ${CH.yellow}DRY RUN ON — nothing will be sent${CH.reset}`);
+  if (cp) {
+    plain(
+      `  ${CH.cyan}checkpoint${CH.reset} ${cp.mode || "?"} @ ${cp.index || 0}/${cp.total || "?"} ${CH.dim}(re-run same mode to resume)${CH.reset}`
+    );
+  }
+  if (s.settings.catalogFilter && s.settings.catalogFilter !== "all") {
+    plain(`  ${CH.dim}filter${CH.reset} ${s.settings.catalogFilter}`);
+  }
   line();
 }
 
 function paintMenu() {
   paint();
-  const options = [
-    ["1", "forge playtime", "game-time badge"],
-    ["2", "forge on titles", "search & pick"],
-    ["3", "forge stream hours", "streaming science"],
-    ["4", "forge games played", "variety badge"],
-    ["5", "forge all badges", "play + stream + variety"],
-    ["6", "forge to next tier", "auto gap to next ladder step"],
-    ["7", "badge ladder", "tiers + vault progress"],
-    ["8", "renew session", "token / cookie"],
-    ["9", "bind fingerprint", "win PE / synthetic"],
-    ["0", "tools / profiles", "settings, journal, export…"],
-    ["x", "exit", ""],
-  ];
-  for (const [num, name, desc] of options) {
-    plain(`${CH.orange}${num}${CH.reset} ${CH.white}${name.padEnd(22)}${CH.reset} ${CH.dim}${desc}${CH.reset}`);
-  }
+
+  section("FORGE");
+  opt("1", "playtime", "game-time hours across catalog");
+  opt("2", "on titles", "search catalog · pick exact games");
+  opt("3", "stream hours", "video_stream science (best-effort)");
+  opt("4", "games played", "variety badge · ~1 min / title");
+  opt("5", "all badges", "playtime + stream + variety");
+  opt("6", "next tier", "auto-fill gap to next ladder step");
+
+  blank();
+  section("PROGRESS");
+  opt("7", "badge ladder", "tiers · vault estimates · next gap");
+
+  blank();
+  section("SESSION");
+  opt("8", "renew session", "re-mint analytics · swap cookie");
+  opt("9", "fingerprint", "Windows PE or synthetic (Termux)");
+
+  blank();
+  section("TOOLS");
+  opt("0", "tools…", "probe · catalog · settings · journal · profiles · checkpoint");
+  opt("x", "exit", "quit");
+
+  line();
+  plain(`${CH.dim}  tip: node index.js --auto --mode all --hours 2 --titles 40${CH.reset}`);
+  plain(`${CH.dim}  tip: --pace drip  ·  --target 500  ·  --preset max-variety  ·  --profile alt${CH.reset}`);
   line();
 }
 
 async function showMenu(ctx) {
   const actions = require("./features");
-  const choice = (await ask(`  ${CH.orange}❯${CH.reset} select: `)).toLowerCase();
+  const choice = (await ask(`  ${CH.orange}❯${CH.reset} `)).toLowerCase();
   blank();
   switch (choice) {
     case "1":
@@ -102,10 +150,11 @@ async function showMenu(ctx) {
       await actions.toolsSubmenu(ctx);
       break;
     case "x":
+    case "q":
     case "":
       return false;
     default:
-      info("unknown option");
+      info(`unknown option ${CH.dim}${choice}${CH.reset} — use 0–9 or x`);
   }
   return true;
 }
@@ -158,4 +207,6 @@ module.exports = {
   askNumber,
   confirm,
   chooseGames,
+  section,
+  opt,
 };

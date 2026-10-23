@@ -1,17 +1,25 @@
 {
-  "name": "spoofbadge",
-  "version": "2.1.0",
-  "description": "discord playtime forge - inflate playtime and games-played badges (Termux/Linux/Windows)",
+  "name": "badges-spoofer",
+  "version": "3.0.0",
+  "description": "Discord badges spoofer — game-time, variety, stream via /science. Termux/Linux/Windows. Zero runtime deps.",
   "main": "index.js",
   "bin": {
+    "badges-spoofer": "index.js",
     "spoofbadge": "index.js"
   },
   "scripts": {
     "start": "node index.js",
     "auto": "node index.js --auto",
-    "setup": "node -e \"console.log('run: bash setup.sh')\""
+    "setup": "bash setup.sh"
   },
-  "author": "orcabase",
+  "keywords": [
+    "discord",
+    "badges",
+    "science",
+    "spoofer",
+    "termux"
+  ],
+  "author": "9ssault",
   "license": "MIT",
   "engines": {
     "node": ">=18"
