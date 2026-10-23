@@ -46,7 +46,7 @@ cd discord-badge-spoofer && git pull --ff-only && node index.js
   9   fingerprint           Windows PE or synthetic (Termux)
 
 ── TOOLS ────────────────────────────────
-  0   tools…                probe · catalog · settings · journal
+ 10   tools…                probe · catalog · settings · journal
                             profiles · checkpoint
   x   exit
 ```
@@ -93,19 +93,19 @@ Env: `DISCORD_TOKEN` · `CF_CLEARANCE_COOKIE` · `SPOOF_HOURS` · `SPOOF_TITLES`
 |---|---|
 | Playtime / variety / stream forge | menu 1–5 |
 | Badge ladder + next-tier | menu 6–7 |
-| Aggressive or drip pace | settings `c` or `--pace` |
+| Aggressive or drip pace | settings or `--pace` |
 | Retry + checkpoint resume | automatic |
-| Multi-profile + export/import | tools `f` |
-| Catalog filters | settings `7` / `--filter` |
+| Multi-profile + export/import | tools (10 → f) |
+| Catalog filters | settings / `--filter` |
 | Progress bar + ETA | during forge |
-| Journal stats | tools `d` |
+| Journal stats | tools (10 → d) |
 | Debug dumps on fail | settings debug on → `debug/` |
 
 **Not included:** dual-token real Go Live. Stream is pure science only.
 
 ---
 
-## Settings (tools → c)
+## Settings (menu 10 → c)
 
 | Setting | Default |
 |---|---|
