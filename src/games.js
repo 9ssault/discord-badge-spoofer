@@ -1,13 +1,20 @@
 "use strict";
 
-/**
- * game catalog: cached detectables list with a cdn fallback.
- * Path fixed to data/games.json inside the repo (Termux-safe).
- */
-
 const fs = require("fs");
 const path = require("path");
 const { PATHS, ENDPOINTS } = require("./config");
+
+const LAUNCHER_HINTS = [
+  "launcher",
+  "steam.exe",
+  "epicgameslauncher",
+  "origin.exe",
+  "uplay",
+  "battlenet",
+  "riotclient",
+  "galaxyclient",
+  "bethesda",
+];
 
 function windowsExecutable(entry) {
   for (const exe of entry.executables || []) {
@@ -26,8 +33,30 @@ function parseCatalog(raw) {
     const execs = entry.executables || [];
     if (!execs.some((e) => e && e.os === "win32" && e.name)) continue;
     seen.add(id);
-    games.push({ id, name: entry.name || "Unknown", exe: windowsExecutable(entry) });
+    const exe = windowsExecutable(entry);
+    const name = entry.name || "Unknown";
+    const distributors = entry.distributors || entry.distributor || [];
+    const dist = Array.isArray(distributors)
+      ? distributors.map((d) => String(d).toLowerCase())
+      : [String(distributors).toLowerCase()];
+    games.push({
+      id,
+      name,
+      exe,
+      verified: entry.verified !== false,
+      steam: dist.some((d) => d.includes("steam")) || /steam/i.test(exe),
+      launcher: LAUNCHER_HINTS.some((h) => exe.toLowerCase().includes(h) || name.toLowerCase().includes(h)),
+    });
   }
+  return games;
+}
+
+function applyFilter(games, filter) {
+  const f = (filter || "all").toLowerCase();
+  if (f === "all" || !f) return games;
+  if (f === "verified") return games.filter((g) => g.verified);
+  if (f === "steam") return games.filter((g) => g.steam);
+  if (f === "no-launcher" || f === "nolauncher") return games.filter((g) => !g.launcher);
   return games;
 }
 
@@ -70,4 +99,4 @@ function searchGames(games, query) {
   return games.filter((g) => g.name.toLowerCase().includes(q)).slice(0, 25);
 }
 
-module.exports = { loadGames, parseCatalog, searchGames };
+module.exports = { loadGames, parseCatalog, searchGames, applyFilter };
