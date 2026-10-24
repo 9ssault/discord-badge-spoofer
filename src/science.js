@@ -8,7 +8,7 @@
  */
 
 const crypto = require("crypto");
-const { CLIENT } = require("./config");
+const { CLIENT, LIMITS } = require("./config");
 const vault = require("./vault");
 const auth = require("./auth");
 
@@ -28,8 +28,14 @@ function nextSeq() {
   return ++seq;
 }
 
-function buildLaunchEvent(game) {
-  const now = Date.now();
+function validateDuration(durationMs) {
+  if (!Number.isSafeInteger(durationMs) || durationMs <= 0 || durationMs > LIMITS.maxHours * 3600000) {
+    throw new Error("Duration must be a positive, bounded integer in milliseconds.");
+  }
+}
+
+function buildLaunchEvent(game, timestamp = Date.now()) {
+  const now = timestamp;
   const state = vault.load();
   const props = {
     client_track_timestamp: now,
@@ -101,13 +107,14 @@ function buildHeartbeatEvent(game, durationMs, sessionId, initial, final, ts = n
 }
 
 function buildSessionTriplet(game, durationMs) {
+  validateDuration(durationMs);
   const sid = crypto.randomUUID();
   const now = Date.now();
   let start = now - durationMs;
   if (start < 0) start = now;
   return [
     buildHeartbeatEvent(game, 0, sid, true, false, start),
-    buildLaunchEvent(game),
+    buildLaunchEvent(game, start),
     buildHeartbeatEvent(game, durationMs, sid, false, true, now),
   ];
 }
@@ -118,6 +125,7 @@ function buildSessionTriplet(game, durationMs) {
  * durationMs is the full claimed stream length (can be multi-hour).
  */
 function buildStreamPair(game, durationMs) {
+  validateDuration(durationMs);
   const now = Date.now();
   let start = now - durationMs;
   if (start < 0) start = now;
@@ -205,12 +213,14 @@ function buildStreamPair(game, durationMs) {
  * Prefer fewer, longer sessions (more realistic than 1h × N).
  */
 function buildStreamBatch(games, totalHours, sessions) {
+  if (!games.length || !Number.isFinite(totalHours) || totalHours <= 0 || totalHours > LIMITS.maxHours || !Number.isSafeInteger(sessions) || sessions < 1) {
+    throw new Error("Select at least one game and a positive stream duration/session count.");
+  }
   const n = Math.max(1, Math.min(sessions, games.length));
   const per = totalHours / n;
   const events = [];
   for (let i = 0; i < n; i++) {
-    const wobble = 1 + (Math.random() * 0.06 - 0.03);
-    const ms = Math.max(60_000, Math.floor(per * wobble * 3600 * 1000));
+    const ms = Math.max(1000, Math.floor(per * 3600 * 1000));
     const game = games[i % games.length];
     for (const ev of buildStreamPair(game, ms)) events.push(ev);
   }
@@ -219,8 +229,7 @@ function buildStreamBatch(games, totalHours, sessions) {
 
 /** Short playtime session (~1 min) for games-played / variety badge. */
 function buildVarietySession(game) {
-  const ms = 60_000 + Math.floor(Math.random() * 30_000);
-  return buildSessionTriplet(game, ms);
+  return buildSessionTriplet(game, 60_000);
 }
 
 module.exports = {
