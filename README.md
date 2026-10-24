@@ -1,128 +1,86 @@
-# Badges Spoofer
+# 9ssault / Ultimate Edition
 
-CLI that inflates Discord **game-time**, **variety**, and **streaming** profile badges by posting client-like events to `/api/v9/science`.
+A gift edition of [9ssault's Discord Badge Spoofer](https://github.com/9ssault/discord-badge-spoofer), with safer credential handling, dependable offline previews, validated input and clearer reporting. Original author: **9ssault**. Local modifications: Ultimate Edition, October 2026.
 
-**Termux · Linux · macOS · Windows** · zero runtime npm deps · interactive **or** fully automatic.
+**Node.js 22 or newer. Zero runtime dependencies. No npm install needed.**
 
-> **Violates Discord ToS.** Account loss possible. Educational use only.
+## Start here
 
----
+Extract the whole folder, then open a terminal in it:
 
-## Quick start (Termux)
-
-```bash
-pkg update -y && pkg install -y nodejs git
-git clone https://github.com/9ssault/discord-badge-spoofer.git
-cd discord-badge-spoofer
-bash setup.sh
+```sh
+node index.js --demo
 ```
 
-### Update without losing credentials
+On Windows, double-click `setup.bat`. On macOS, Linux or Termux, run `bash setup.sh`. Both launch the offline menu by default and forward any arguments you provide. They do not install software or packages.
 
-```bash
-cd discord-badge-spoofer && git pull --ff-only && node index.js
+Try a complete offline preview:
+
+```sh
+node index.js --dry --auto --mode variety --titles 100
 ```
 
-`vault.json`, `profiles/`, `checkpoint.json`, `debug/` are gitignored.
+The preview uses a **bundled synthetic demo catalog**, not Discord's real game catalog. It does not read saved credentials, contact Discord, or write account state, profiles, checkpoints or journals. Preview totals represent planned events only. `--demo` is an alias for offline mode; `--dry` keeps the whole process offline.
 
----
+## What changed
 
-## Interactive menu
+- Offline startup by default; live network activity requires an explicit `--live`.
+- Masked terminal prompts; credentials remain in process memory instead of being copied into `.env`, exports or profile files.
+- Validated command-line values, number prompts and bounded title selections.
+- Honest local reporting: accepted telemetry is not confirmed badge progress.
+- Clear experimental labels for streaming; no claim that streaming unlocks a badge.
+- Cancellation handling, bounded retries and more careful checkpoints.
+- Redacted logs, secret-free exports and separate profile metadata.
+- Readable terminal output that respects `NO_COLOR`, redirected output and scrollback.
+- Automated offline tests and portable launch scripts.
 
-```
-── FORGE ────────────────────────────────
-  1   playtime              game-time hours across catalog
-  2   on titles             search catalog · pick exact games
-  3   stream hours          video_stream science (best-effort)
-  4   games played          variety badge · ~1 min / title
-  5   all badges            playtime + stream + variety
-  6   next tier             auto-fill gap to next ladder step
+## Modes and controls
 
-── PROGRESS ─────────────────────────────
-  7   badge ladder          tiers · vault estimates · next gap
-
-── SESSION ──────────────────────────────
-  8   renew session         re-mint analytics · swap cookie
-  9   fingerprint           Windows PE or synthetic (Termux)
-
-── TOOLS ────────────────────────────────
- 10   tools…                probe · catalog · settings · journal
-                            profiles · checkpoint
-  x   exit
+```sh
+node index.js --help
+node index.js --dry --auto --mode playtime --hours 1 --titles 20
+node index.js --dry --auto --mode stream --hours 2
+node index.js --dry --auto --mode all --hours 1 --titles 20
+node index.js --dry --profile gift --auto --mode variety --titles 100
 ```
 
-Status strip shows **profile**, **auth**, **session**, **pace**, vault hours (play / stream / variety), dry-run flag, and any **checkpoint**.
+The menu retains playtime, title search, variety, experimental streaming, ladder estimates, profiles and tools. `--profile NAME` separates local settings and progress metadata; it does not save credentials. During an offline preview, profile changes are temporary.
 
----
+A deliberate `--live` launch enables network requests and local metadata storage. Interactive credential prompts mask input. Automatic use requires `DISCORD_TOKEN` and `CF_CLEARANCE_COOKIE` from the process environment; do not put credentials in command-line arguments, screenshots, shared files or committed configuration. Non-terminal secret prompting is refused instead of echoing sensitive input.
 
-## CLI (auto)
+Live metadata is kept in `.local/` by default. Set `BADGES_DATA_DIR` in the process environment to select another directory. The application never reads or writes `.env` files.
 
-```bash
-node index.js --auto --mode playtime --hours 2 --titles 40
-node index.js --auto --mode stream --hours 50 --pace drip
-node index.js --auto --mode variety --titles 100
-node index.js --auto --mode all --hours 2 --titles 40
-node index.js --auto --mode next
-node index.js --auto --target 500 --mode playtime
-node index.js --auto --preset max-variety
-node index.js --profile alt --auto --mode playtime --hours 1
-node index.js --filter steam --auto --titles 30
-node index.js --dry
+A session setting cannot override the offline startup policy. Checkpoints and local totals are bookkeeping, not evidence of a badge unlock.
+
+Each live profile binds to the account returned by Discord's identity endpoint. Changing accounts requires a different `--profile`; activity imports must match that account. Old activity without an account identity requires a fresh profile.
+
+## Reporting and limitations
+
+Live accepted counts mean that the endpoint accepted the corresponding requests. They do **not** prove Discord credited the activity, granted a badge or updated its servers. Actual verified badge progress is unavailable to this application.
+
+Streaming telemetry is experimental and its badge effect is unverified. This edition improves the program's reliability and handling of local data; it does not establish whether the badge method still works.
+
+Checkpoints match the account, profile and exact activity plan. Graceful cancellation reports accepted submissions, but an abrupt process exit or storage failure can leave local totals incomplete. A failed write is reported separately; restarting is not a guarantee against duplicate submissions.
+
+The original project sends fabricated Discord activity. That may violate Discord's rules and may affect the account used. No Discord account is needed for the included demo or tests.
+
+## Existing installations
+
+Use this edition in a fresh extracted folder for the cleanest start. New profile exports contain metadata only. Credential keys from older files are not imported as usable credentials; enter credentials for the current process when needed.
+
+Older copies of `vault.json`, `science_state.json`, `.env`, profile exports and debug dumps may still contain secrets written by earlier versions. This edition does not erase unrelated files or backups. Do not include those files when sharing the gift.
+
+## Verify
+
+```sh
+npm test
+node index.js --dry --auto --mode variety --titles 100
 ```
 
-| Flag | Meaning |
-|---|---|
-| `--auto` | non-interactive |
-| `--mode` | `playtime` \| `stream` \| `variety` \| `all` \| `next` |
-| `--hours` / `-H` | hours per title or total stream hours |
-| `--titles` / `-t` | catalog count |
-| `--target` | stop when vault reaches N hours (or N titles for variety) |
-| `--pace` | `aggressive` (default) or `drip` |
-| `--preset` | `max-variety` `quick-play` `dump-play` `dump-stream` |
-| `--profile` | switch/create named profile |
-| `--filter` | `all` `verified` `steam` `no-launcher` |
-| `--dry` | send nothing |
+Tests run locally with fixtures and mocked network responses. They do not validate real Discord badge unlocks.
 
-Env: `DISCORD_TOKEN` · `CF_CLEARANCE_COOKIE` · `SPOOF_HOURS` · `SPOOF_TITLES`
+See [CHANGELOG.md](CHANGELOG.md) for the repair summary and [START-HERE.txt](START-HERE.txt) for the short gift note.
 
----
+## License
 
-## Features
-
-| Feature | Where |
-|---|---|
-| Playtime / variety / stream forge | menu 1–5 |
-| Badge ladder + next-tier | menu 6–7 |
-| Aggressive or drip pace | settings or `--pace` |
-| Retry + checkpoint resume | automatic |
-| Multi-profile + export/import | tools (10 → f) |
-| Catalog filters | settings / `--filter` |
-| Progress bar + ETA | during forge |
-| Journal stats | tools (10 → d) |
-| Debug dumps on fail | settings debug on → `debug/` |
-
-**Not included:** dual-token real Go Live. Stream is pure science only.
-
----
-
-## Settings (menu 10 → c)
-
-| Setting | Default |
-|---|---|
-| batch size | 50 |
-| batch pause | 300 ms |
-| wobble | on |
-| dry run | off |
-| pace | aggressive \| drip |
-| drip pause | 15 min between batches |
-| catalog filter | all |
-| max retries | 4 |
-| debug dump | off |
-
----
-
-## Disclaimer
-
-> Forges Discord telemetry and violates ToS. Use at your own risk.
-
-**Badges Spoofer** · v3 · MIT
+The repository's original [GNU GPL version 3 license](LICENSE) is retained. This is a modified source edition of 9ssault's project, not an official Discord product. Keep the license, original attribution and modified source together when redistributing.
