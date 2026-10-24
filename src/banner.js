@@ -1,27 +1,14 @@
 "use strict";
 
-/** Wordmark + flavor for Badges Spoofer. */
-
-const ART = [
-  "  ____            _                     ",
-  " |  _ \\  __ _  __| | __ _  ___  ___     ",
-  " | |_) |/ _` |/ _` |/ _` |/ _ \\/ __|    ",
-  " |  _ <| (_| | (_| | (_| |  __/\\__ \\    ",
-  " |_| \\_\\\\__,_|\\__,_|\\__, |\\___||___/    ",
-  "                     |___/              ",
-  "        S  P  O  O  F  E  R             ",
-];
-
-const TAGLINE = "playtime · variety · stream  ·  science forge";
-
-const QUIPS = [
-  "the badges write themselves.",
-  "hours logged, dignity intact.",
-  "science demands sacrifices.",
-  "playtime is a state of mind.",
-  "one more tier.",
-  "vault hours go brrr.",
-  "204 means the wire accepted it.",
-];
-
-module.exports = { ORCA: { art: ART, tagline: TAGLINE, quips: QUIPS } };
+// Original project and author: 9ssault/discord-badge-spoofer.
+module.exports = {
+  ORCA: {
+    art: ["9ssault / ULTIMATE EDITION", "Discord Badge Spoofer"],
+    tagline: "A gift edition of 9ssault's original project · v4",
+    quips: [
+      "Local totals do not confirm badge credit.",
+      "An accepted request does not confirm a badge unlock.",
+      "Preview first. Keep credentials in this session.",
+    ],
+  },
+};

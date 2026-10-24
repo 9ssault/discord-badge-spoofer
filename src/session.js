@@ -1,49 +1,27 @@
 "use strict";
-
-/**
- * per-run identity: heartbeat session id, launch signature, super props,
- * plus the analytics token lifecycle.
- */
-
-const crypto = require("crypto");
+const crypto = require("node:crypto");
 const vault = require("./vault");
 const props = require("./props");
 const science = require("./science");
 const auth = require("./auth");
-
-/** current base64 super-properties (set by begin/renew) */
+const runtime = require("./runtime");
 let superProps = "";
-
 async function begin() {
-  const hb = crypto.randomUUID();
-  const sig = crypto.randomUUID();
-  const sp = await props.buildSuperProps(hb, sig);
-  superProps = sp;
-  science.bindSession(hb, sig, sp);
-  return { hb, sig, superProps: sp };
+  const hb = crypto.randomUUID(), sig = crypto.randomUUID();
+  superProps = await props.buildSuperProps(hb, sig);
+  science.bindSession(hb, sig, superProps);
+  return { hb, sig, superProps };
 }
-
 async function renew() {
+  runtime.assertOnline();
   const s = vault.load();
-  const sp = await props.buildSuperProps(crypto.randomUUID(), crypto.randomUUID());
-  superProps = sp;
-  s.analyticsToken = await auth.mintAnalyticsToken(sp);
+  if (!s.token) throw new Error("Credentials are missing for this profile.");
+  if (!superProps) await begin();
+  s.analyticsToken = await auth.mintAnalyticsToken(superProps);
+  require("./log").registerSecret(s.analyticsToken);
   s.mintedAt = Date.now();
-  vault.save();
-  await begin();
   return s.analyticsToken;
 }
-
-function getSuperProps() {
-  return superProps;
-}
-
-module.exports = {
-  begin,
-  renew,
-  getSuperProps,
-  // legacy accessor used by forge.js
-  get superProps() {
-    return superProps;
-  },
-};
+function getSuperProps() { return superProps; }
+function clear() { superProps = ""; }
+module.exports = { begin, renew, clear, getSuperProps, get superProps() { return superProps; } };
