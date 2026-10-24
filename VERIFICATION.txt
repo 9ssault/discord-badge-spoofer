@@ -1,23 +1,32 @@
-ULTIMATE EDITION 4.0.0 - RELEASE CHECK
+ULTIMATE EDITION 4.1.0 - TECHNICAL VALIDATION
 Date: 2026-10-24
 Original source: https://github.com/9ssault/discord-badge-spoofer
 Original revision: 7abe64d106cdb780b1bb90ba34a8d156ceaf4078
 
-Environment tested: Windows, Node.js v24.19.0.
-Minimum supported runtime declared: Node.js 22.
-Other operating systems and Node.js versions have not been exercised here.
+Test environment: Windows, Node.js v24.19.0.
+Declared minimum runtime: Node.js 22.
+Other operating systems and Node.js versions were not tested.
 
-Automated result: 64 tests passed, 0 failed.
-Run the suite yourself with: node --test
+AUTOMATED CHECKS
+The latest full offline suite passed 82 of 82 tests, with 0 failures, after the
+MFA-capability display change. No tests were skipped or cancelled.
+Run the full suite locally with: node --test
 
-Coverage includes credential isolation, masked input, metadata/account binding,
-offline CLI modes, catalog parsing, coherent event timestamps, rate limits,
-timeouts, cancellation, exact-plan resume, partial failures and accounting.
-Live request handling is tested with mocked endpoints. No real Discord token
-or account was used for this verification.
+Coverage includes credential isolation, masked input, account binding, offline
+CLI modes, catalog parsing, event timestamps, request limits, timeouts,
+cancellation, exact-plan resume, partial failures and submission accounting.
+Sign-in checks cover password/MFA requests, scoped cookies, challenge handling,
+sanitized errors, identity verification, MFA retries and analytics renewal.
+Automated tests use mocked endpoints and synthetic credentials.
 
-The interactive offline menu and 100-title preview were also exercised.
-The release ZIP is checked for source completeness and credential/state files.
+MANUAL CHECKS
+The interactive offline menu and a 100-title preview were exercised.
+Direct program sign-in, account identity verification and retrieval of the
+official catalog succeeded.
+Submissions for 100 distinct GameVariety titles were accepted by the telemetry
+endpoint across three runs, with no failed units.
 
-These checks verify program behavior, not real Discord badge credit.
-Streaming and the underlying badge method remain unverified.
+LIMITATIONS
+Endpoint acceptance confirms receipt of requests, not credited activity or a
+badge award. Real badge credit has not been verified. Streaming and the
+underlying badge method remain unverified.

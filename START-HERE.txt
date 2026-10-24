@@ -33,7 +33,13 @@ No npm install is needed.
 
 GOOD TO KNOW
 --live explicitly enables network activity. Credentials are session-only.
+For experimental email/password sign-in: node index.js --live --signin
+Enter credentials only in its masked prompts. Extra verification may block it.
 Local accepted totals do not verify Discord badge credit.
+Discord says badge progress can take time to reflect recent activity, with no
+guaranteed update time. This does not confirm credit for this tool's submissions.
+Official guide:
+https://support.discord.com/hc/en-us/articles/44369363856663-Discord-Profile-Badges-What-Each-Badge-Means
 Streaming remains experimental. The badge method itself is unverified.
 Do not share old credential files or backups with this gift.
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## Ultimate Edition — 4.1.0 — October 2026
+
+- Add experimental direct email/password and authenticator-code sign-in with `--live --signin`.
+- Keep freshly issued credentials in memory and verify account identity before opening the menu.
+- Stop explicitly on CAPTCHA, unsupported verification, failed authentication and rate limiting.
+- Preserve intentional whitespace in password input.
+- Retry a rejected authenticator code with fresh input while keeping the same sign-in ticket; show sanitized HTTP and Discord error codes.
+- Refresh analytics without discarding the account's in-memory sign-in credentials.
+- Remove the unconditional requirement for a manually copied cookie header.
+- Add mocked sign-in, MFA, input-handling and bootstrap integration tests.
+
+Browser sign-in does not transfer its session to this program. Direct sign-in and actual badge credit are separate verification steps.
+
 ## Ultimate Edition — 4.0.0 — October 2026
 
 A locally modified gift edition of 9ssault's original project.
