@@ -1,0 +1,23 @@
+ULTIMATE EDITION 4.0.0 - RELEASE CHECK
+Date: 2026-10-24
+Original source: https://github.com/9ssault/discord-badge-spoofer
+Original revision: 7abe64d106cdb780b1bb90ba34a8d156ceaf4078
+
+Environment tested: Windows, Node.js v24.19.0.
+Minimum supported runtime declared: Node.js 22.
+Other operating systems and Node.js versions have not been exercised here.
+
+Automated result: 64 tests passed, 0 failed.
+Run the suite yourself with: node --test
+
+Coverage includes credential isolation, masked input, metadata/account binding,
+offline CLI modes, catalog parsing, coherent event timestamps, rate limits,
+timeouts, cancellation, exact-plan resume, partial failures and accounting.
+Live request handling is tested with mocked endpoints. No real Discord token
+or account was used for this verification.
+
+The interactive offline menu and 100-title preview were also exercised.
+The release ZIP is checked for source completeness and credential/state files.
+
+These checks verify program behavior, not real Discord badge credit.
+Streaming and the underlying badge method remain unverified.

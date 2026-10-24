@@ -1,0 +1,40 @@
+9ssault / ULTIMATE EDITION
+A gift edition of your Discord Badge Spoofer.
+
+Original project: https://github.com/9ssault/discord-badge-spoofer
+Original author: 9ssault
+Modified locally: October 2026
+
+WHAT'S INSIDE
+A repaired source edition with offline previews, session-only credentials,
+masked prompts, validated input, clearer reporting and regression tests.
+Your original GPLv3 license and attribution are preserved.
+
+FIRST LAUNCH
+1. Install Node.js 22 or newer if needed: https://nodejs.org/
+2. Extract this entire folder.
+3. Windows: double-click setup.bat.
+   macOS / Linux / Termux: open a terminal here and run bash setup.sh.
+
+Launch opens an OFFLINE PREVIEW. Nothing is sent to Discord.
+
+QUICK DEMO
+node index.js --dry --auto --mode variety --titles 100
+
+This uses synthetic demo titles, not Discord's real catalog.
+
+CHECK THE REPAIRS
+npm test
+
+MORE OPTIONS
+node index.js --help
+See README.md and CHANGELOG.md for details.
+No npm install is needed.
+
+GOOD TO KNOW
+--live explicitly enables network activity. Credentials are session-only.
+Local accepted totals do not verify Discord badge credit.
+Streaming remains experimental. The badge method itself is unverified.
+Do not share old credential files or backups with this gift.
+
+All source is included so you can inspect, change and keep building it.

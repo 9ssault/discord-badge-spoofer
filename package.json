@@ -1,28 +1,25 @@
 {
-  "name": "badges-spoofer",
-  "version": "3.0.0",
-  "description": "Discord badges spoofer — game-time, variety, stream via /science. Termux/Linux/Windows. Zero runtime deps.",
+  "name": "9ssault-badges-ultimate",
+  "version": "4.0.0",
+  "description": "A repaired source edition with offline previews, session-only credentials, exact-plan checkpoints, and honest telemetry reporting.",
   "main": "index.js",
   "bin": {
-    "badges-spoofer": "index.js",
-    "spoofbadge": "index.js"
+    "badges-ultimate": "index.js"
   },
   "scripts": {
     "start": "node index.js",
-    "auto": "node index.js --auto",
-    "setup": "bash setup.sh"
+    "demo": "node index.js --demo",
+    "test": "node --test",
+    "check": "node --check index.js"
   },
-  "keywords": [
-    "discord",
-    "badges",
-    "science",
-    "spoofer",
-    "termux"
-  ],
   "author": "9ssault",
-  "license": "MIT",
+  "contributors": [
+    "Ultimate Edition local contributors"
+  ],
+  "license": "GPL-3.0-only",
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
-  "dependencies": {}
+  "dependencies": {},
+  "private": true
 }
