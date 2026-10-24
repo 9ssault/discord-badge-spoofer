@@ -4,15 +4,16 @@
 const runtime = require("./src/runtime");
 const vault = require("./src/vault");
 const session = require("./src/session");
+const { createSignInSession } = require("./src/signin");
 const games = require("./src/games");
 const features = require("./src/features");
 const ui = require("./src/ui");
 const log = require("./src/log");
 const { PATHS, LIMITS, PRESETS } = require("./src/config");
-const VERSION = "4.0.0";
+const VERSION = "4.1.0";
 
 function parseArgs(argv) {
-  const args = { auto: false, live: false, dry: false, demo: false, help: false,
+  const args = { auto: false, live: false, signin: false, dry: false, demo: false, help: false,
     version: false, mode: "variety", hours: null, titles: null, target: null,
     pace: null, preset: null, profile: "default", filter: null };
   const values = new Map([
@@ -20,7 +21,7 @@ function parseArgs(argv) {
     ["--titles", "titles"], ["-t", "titles"], ["--target", "target"],
     ["--pace", "pace"], ["--preset", "preset"], ["--profile", "profile"], ["--filter", "filter"],
   ]);
-  const flags = { "--auto": "auto", "-a": "auto", "--live": "live", "--dry": "dry",
+  const flags = { "--auto": "auto", "-a": "auto", "--live": "live", "--signin": "signin", "--dry": "dry",
     "--dry-run": "dry", "--demo": "demo", "--help": "help", "-h": "help",
     "--version": "version", "-v": "version" };
   for (let i = 2; i < argv.length; i++) {
@@ -33,6 +34,7 @@ function parseArgs(argv) {
     } else throw new Error("Unknown option: " + flag + ". Use --help.");
   }
   if (args.live && (args.dry || args.demo)) throw new Error("--live cannot be combined with --dry or --demo.");
+  if (args.signin && (!args.live || args.auto)) throw new Error("--signin requires interactive --live mode. Passwords are entered only in masked prompts.");
   if (!["variety", "playtime", "stream", "all"].includes(args.mode)) throw new Error("Mode must be variety, playtime, stream, or all.");
   if (args.pace && !["standard", "aggressive", "drip"].includes(args.pace)) throw new Error("Pace must be standard or drip.");
   if (args.preset && !Object.hasOwn(PRESETS, args.preset)) throw new Error("Unknown preset.");
@@ -63,6 +65,7 @@ function printHelp() {
   node index.js --demo                  offline 100-game preview
   node index.js --dry --auto --mode variety --titles 100
   node index.js --live                  interactive live mode
+  node index.js --live --signin         sign in with email/password and authenticator code
   node index.js --live --auto --mode variety --titles 100
   node index.js --live --auto --mode playtime --hours 1 --titles 5
   node index.js --live --auto --mode stream --hours 5
@@ -77,6 +80,7 @@ function printHelp() {
   --pace standard|drip                 drip pauses 15 minutes between batches
   --dry / --demo                       no network, credential access, or state writes
   --live                               explicitly enable authenticated requests
+  --signin                             direct sign-in; stops on unsupported verification
   --help / --version
 
   Node.js 22+; no dependencies to install.
@@ -99,6 +103,13 @@ function seedFromEnv() {
   }
 }
 
+function describeError(error) {
+  const details = [];
+  if (Number.isInteger(error?.status)) details.push("HTTP " + error.status);
+  if (Number.isSafeInteger(error?.discordCode)) details.push("Discord code " + error.discordCode);
+  return (error?.message || "Run failed.") + (details.length ? " (" + details.join(", ") + ")" : "");
+}
+
 async function bootstrap(args) {
   const s = vault.load();
   s.settings.dryRun = runtime.isOffline();
@@ -111,21 +122,54 @@ async function bootstrap(args) {
   }
   log.warn("Unofficial activity submission can violate Discord's terms and risk the account.");
   log.info("Credentials remain in memory. Badge credit cannot be confirmed by this tool.");
-  seedFromEnv();
-  for (const [field, label, variable] of [["token", "Discord account token", "DISCORD_TOKEN"],
-    ["cookie", "Discord cookie header", "CF_CLEARANCE_COOKIE"]]) {
-    if (!s[field]) {
-      if (args.auto) throw new Error(variable + " is missing. Supply it privately through the process environment.");
-      s[field] = await ui.askSecret(label + ": ");
-      if (!s[field]) throw new Error(label + " is required.");
-      log.registerSecret(s[field]);
+  await session.begin();
+  if (args.signin) {
+    vault.clearSecrets();
+    const loginSession = createSignInSession({ superProperties: session.getSuperProps() });
+    try {
+      log.info("Direct sign-in uses Discord's user API. Additional verification may prevent it.");
+      const email = await ui.askSecret("Discord email or phone: ");
+      let password = await ui.askSecret("Discord password: ", { trim: false });
+      let result;
+      try { result = await loginSession.start(email, password); }
+      finally { password = ""; }
+      if (result.status === "mfa_required") {
+        log.info("Account verification options: authenticator " + (result.totp ? "available" : "unavailable") + ", SMS " + (result.sms ? "available" : "unavailable") + ".");
+        if (!result.totp) throw new Error("This sign-in requires an unsupported verification method. No activity was submitted.");
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const code = await ui.askSecret("Current 6-digit Discord authenticator code: ");
+          try { result = await loginSession.completeTotp(code); break; }
+          catch (error) {
+            if (error.code !== "AUTH_INVALID_CODE" || attempt === 2) throw error;
+            log.warn(describeError(error));
+            log.info("Enter a fresh code to retry, or press Ctrl+C to cancel.");
+          }
+        }
+      }
+      if (result.status !== "authenticated" || !result.token) throw new Error("Sign-in did not establish an account session.");
+      s.token = result.token;
+      s.cookie = result.cookie || "";
+      log.registerSecret(s.token);
+      if (s.cookie) log.registerSecret(s.cookie);
+      log.info("Direct sign-in succeeded. Verifying account identity…");
+    } finally { loginSession.clear(); }
+  } else {
+    seedFromEnv();
+    if (!s.token) {
+      if (args.auto) throw new Error("DISCORD_TOKEN is missing. Use interactive --live --signin or supply the token privately through the process environment.");
+      s.token = await ui.askSecret("Discord account token: ");
+      if (!s.token) throw new Error("Discord account token is required.");
+      log.registerSecret(s.token);
+    }
+    if (!s.cookie && !args.auto) {
+      s.cookie = await ui.askSecret("Discord cookie header (optional; Enter to skip): ");
+      if (s.cookie) log.registerSecret(s.cookie);
     }
   }
+  await session.renew();
   log.info("Loading Discord's game catalog…");
   const catalog = await games.loadGames();
   if (!catalog.length) throw new Error("The live catalog could not be loaded. No activity was submitted.");
-  await session.begin();
-  await session.renew();
   log.info("Session ready · " + catalog.length + " catalog entries");
   vault.save();
   return { games: catalog };
@@ -144,7 +188,7 @@ async function runAuto(args, ctx) {
     if (!remaining) { log.info("Local target already met; no request made."); return; }
     if (mode === "variety") count = remaining;
     else if (mode === "stream") hours = remaining;
-    else hours = remaining; // divide by actual selected count below
+    else hours = remaining;
   }
   const catalog = features.filteredCatalog(ctx.games);
   if (!catalog.length) throw new Error("No catalog entries match the filter.");
@@ -192,7 +236,7 @@ if (require.main === module) {
   process.on("SIGTERM", () => { runtime.cancel(); ui.closeRl(); process.exitCode = 130; });
   main().catch(err => {
     const interrupted = runtime.signal().aborted || err?.name === "AbortError";
-    log.fail(interrupted ? "Stopped. Accepted telemetry may already have reached Discord." : err.message || "Run failed.");
+    log.fail(interrupted ? "Stopped. Accepted telemetry may already have reached Discord." : describeError(err));
     process.exitCode = interrupted ? 130 : 1;
   }).finally(() => { vault.clearSecrets(); ui.closeRl(); });
 }
