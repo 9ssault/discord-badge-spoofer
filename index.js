@@ -1,293 +1,199 @@
 #!/usr/bin/env node
 "use strict";
 
-/**
- * Badges Spoofer — interactive + auto CLI
- *
- * node index.js
- * node index.js --auto --mode all --hours 2 --titles 40
- * node index.js --auto --mode stream --hours 50 --pace drip
- * node index.js --auto --preset max-variety
- * node index.js --auto --target 500 --mode playtime
- * node index.js --profile alt
- */
-
+const runtime = require("./src/runtime");
 const vault = require("./src/vault");
 const session = require("./src/session");
-const gamesMod = require("./src/games");
+const games = require("./src/games");
 const features = require("./src/features");
 const ui = require("./src/ui");
-const auth = require("./src/auth");
-const envstore = require("./src/envstore");
-const badges = require("./src/badges");
-const { CH, info, pass, fail, warn, BULLET, blank, line } = require("./src/log");
-const { PATHS, ENDPOINTS, PRESETS } = require("./src/config");
-const { ORCA } = require("./src/banner");
-const fmt = require("./src/format");
-
-const ctx = { games: [] };
+const log = require("./src/log");
+const { PATHS, LIMITS, PRESETS } = require("./src/config");
+const VERSION = "4.0.0";
 
 function parseArgs(argv) {
-  const args = {
-    auto: false,
-    hours: null,
-    titles: null,
-    dry: false,
-    help: false,
-    mode: "playtime",
-    pace: null,
-    preset: null,
-    target: null,
-    profile: null,
-    filter: null,
-  };
+  const args = { auto: false, live: false, dry: false, demo: false, help: false,
+    version: false, mode: "variety", hours: null, titles: null, target: null,
+    pace: null, preset: null, profile: "default", filter: null };
+  const values = new Map([
+    ["--mode", "mode"], ["-m", "mode"], ["--hours", "hours"], ["-H", "hours"],
+    ["--titles", "titles"], ["-t", "titles"], ["--target", "target"],
+    ["--pace", "pace"], ["--preset", "preset"], ["--profile", "profile"], ["--filter", "filter"],
+  ]);
+  const flags = { "--auto": "auto", "-a": "auto", "--live": "live", "--dry": "dry",
+    "--dry-run": "dry", "--demo": "demo", "--help": "help", "-h": "help",
+    "--version": "version", "-v": "version" };
   for (let i = 2; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--auto" || a === "-a") args.auto = true;
-    else if (a === "--dry" || a === "--dry-run") args.dry = true;
-    else if (a === "--help" || a === "-h") args.help = true;
-    else if (a === "--hours" || a === "-H") args.hours = Number(argv[++i]);
-    else if (a === "--titles" || a === "-t") args.titles = Number(argv[++i]);
-    else if (a === "--mode" || a === "-m") args.mode = String(argv[++i] || "playtime").toLowerCase();
-    else if (a === "--pace") args.pace = String(argv[++i] || "").toLowerCase();
-    else if (a === "--preset") args.preset = String(argv[++i] || "").toLowerCase();
-    else if (a === "--target") args.target = Number(argv[++i]);
-    else if (a === "--profile") args.profile = String(argv[++i] || "");
-    else if (a === "--filter") args.filter = String(argv[++i] || "").toLowerCase();
+    const flag = argv[i];
+    if (flags[flag]) args[flags[flag]] = true;
+    else if (values.has(flag)) {
+      const value = argv[++i];
+      if (value === undefined || value.startsWith("--")) throw new Error("Missing value for " + flag);
+      args[values.get(flag)] = value;
+    } else throw new Error("Unknown option: " + flag + ". Use --help.");
   }
+  if (args.live && (args.dry || args.demo)) throw new Error("--live cannot be combined with --dry or --demo.");
+  if (!["variety", "playtime", "stream", "all"].includes(args.mode)) throw new Error("Mode must be variety, playtime, stream, or all.");
+  if (args.pace && !["standard", "aggressive", "drip"].includes(args.pace)) throw new Error("Pace must be standard or drip.");
+  if (args.preset && !Object.hasOwn(PRESETS, args.preset)) throw new Error("Unknown preset.");
+  if (args.filter && !["all", "verified", "steam", "no-launcher"].includes(args.filter)) throw new Error("Unknown catalog filter.");
+  if (!/^[a-zA-Z0-9_-]{1,48}$/.test(args.profile)) throw new Error("Profile must be 1–48 letters, digits, underscores, or hyphens.");
+  for (const key of ["hours", "titles", "target"]) {
+    if (args[key] === null) continue;
+    args[key] = Number(args[key]);
+    const max = key === "titles" ? LIMITS.maxTitles : LIMITS.maxHours;
+    if (!Number.isFinite(args[key]) || args[key] <= 0 || args[key] > max ||
+      (key === "titles" && !Number.isInteger(args[key]))) {
+      throw new Error(key + " must be a positive " + (key === "titles" ? "integer" : "number") + " at most " + max + ".");
+    }
+  }
+  if (args.demo) { args.auto = true; if (args.titles === null) args.titles = 100; }
+  if (args.target !== null && args.mode === "all") throw new Error("--target requires a single mode.");
+  if (args.preset && args.target !== null) throw new Error("Use either --preset or --target.");
+  if (args.target !== null && args.mode === "variety" && !Number.isInteger(args.target)) throw new Error("A variety target must be an integer.");
   return args;
 }
 
-function quip() {
-  return ORCA.quips[Math.floor(Math.random() * ORCA.quips.length)];
+function printHelp() {
+  console.log(`
+  9ssault / Ultimate Edition  ${VERSION}
+  Local activity experiments. Actual badge credit is unverified.
+
+  node index.js                         offline interactive preview
+  node index.js --demo                  offline 100-game preview
+  node index.js --dry --auto --mode variety --titles 100
+  node index.js --live                  interactive live mode
+  node index.js --live --auto --mode variety --titles 100
+  node index.js --live --auto --mode playtime --hours 1 --titles 5
+  node index.js --live --auto --mode stream --hours 5
+
+  --mode variety|playtime|stream|all    streaming is experimental
+  --hours N                            hours/title, or total stream hours
+  --titles N                           maximum unique titles selected
+  --target N                           local accepted-total target; not a badge reading
+  --preset max-variety|quick-play|dump-play|dump-stream
+  --profile NAME                       isolated metadata; credentials never saved
+  --filter all|verified|steam|no-launcher
+  --pace standard|drip                 drip pauses 15 minutes between batches
+  --dry / --demo                       no network, credential access, or state writes
+  --live                               explicitly enable authenticated requests
+  --help / --version
+
+  Node.js 22+; no dependencies to install.
+  Live automation accepts DISCORD_TOKEN and CF_CLEARANCE_COOKIE from the
+  process environment only. Interactive live input is masked.
+  Files named .env are never read or written. BADGES_DATA_DIR selects the
+  metadata directory. Dry-run games are labeled fictional demo records.
+`);
 }
 
 function seedFromEnv() {
-  envstore.loadQuiet();
+  if (runtime.isOffline()) return;
   const s = vault.load();
-  let changed = false;
-  const tok = process.env.DISCORD_TOKEN || process.env.TOKEN || "";
-  const ck = process.env.CF_CLEARANCE_COOKIE || process.env.COOKIE || "";
-  if (tok && !s.token) {
-    s.token = tok.trim();
-    changed = true;
-  }
-  if (ck && !s.cookie) {
-    s.cookie = ck.trim();
-    changed = true;
-  }
-  if (changed) {
-    vault.save();
-    envstore.sync({ token: s.token, cookie: s.cookie });
+  for (const [name, field] of [["DISCORD_TOKEN", "token"], ["CF_CLEARANCE_COOKIE", "cookie"]]) {
+    const value = process.env[name];
+    if (typeof value === "string" && value.trim()) {
+      s[field] = value.trim();
+      log.registerSecret(s[field]);
+    }
   }
 }
 
-async function bootstrap({ interactive }) {
-  blank();
-  seedFromEnv();
+async function bootstrap(args) {
   const s = vault.load();
-  info(`vault ${CH.dim}${BULLET}${CH.reset} ${PATHS.vault}  profile=${s.activeProfile}`);
-  info(`platform ${CH.dim}${BULLET}${CH.reset} ${process.platform} / node ${process.versions.node}`);
-  blank();
-
-  if (!s.token) {
-    if (!interactive) {
-      fail("DISCORD_TOKEN missing");
-      return false;
-    }
-    const tok = await ui.ask(`  ${CH.dim}token:${CH.reset} `);
-    if (!tok) {
-      fail("token required");
-      return false;
-    }
-    s.token = tok;
-    vault.save();
-    envstore.sync({ token: tok });
-    pass("token stored");
-  } else pass(`token loaded (${auth.userIdFromToken(s.token) || "?"})`);
-
-  if (!s.cookie) {
-    if (!interactive) {
-      fail("CF_CLEARANCE_COOKIE missing");
-      return false;
-    }
-    const ck = await ui.ask(`  ${CH.dim}cookie:${CH.reset} `);
-    if (!ck) {
-      fail("cookie required");
-      return false;
-    }
-    s.cookie = ck;
-    vault.save();
-    envstore.sync({ cookie: ck });
-    pass("cookie stored");
-  } else pass("cookie loaded");
-
-  if (!s.fingerprint) {
-    try {
-      const uid = auth.userIdFromToken(s.token) || "0";
-      s.fingerprint = auth.syntheticFingerprint(uid);
-      vault.save();
-      pass(`synthetic fingerprint (${s.fingerprint.length} chars)`);
-    } catch (e) {
-      warn(String(e.message || e));
-    }
-  }
-
-  blank();
-  info("loading catalog…");
-  ctx.games = await gamesMod.loadGames();
-  if (!ctx.games.length) {
-    fail("catalog empty");
-    return false;
-  }
-  pass(`${ctx.games.length} titles`);
-
-  blank();
-  try {
-    await session.begin();
-    if (!vault.tokenFresh()) await session.renew();
-    pass("session established");
-  } catch (e) {
-    fail(String(e.message || e));
-    return false;
-  }
-  blank();
-  info(quip());
-  return true;
-}
-
-async function runAuto(args) {
-  const s = vault.load();
-  if (args.dry) s.settings.dryRun = true;
-  if (args.pace === "drip" || args.pace === "aggressive") s.settings.pace = args.pace;
+  s.settings.dryRun = runtime.isOffline();
+  if (args.pace) s.settings.pace = args.pace === "aggressive" ? "standard" : args.pace;
   if (args.filter) s.settings.catalogFilter = args.filter;
-  vault.save();
-
-  let mode = args.mode || "playtime";
-  let hours =
-    Number.isFinite(args.hours) && args.hours > 0
-      ? args.hours
-      : Number(process.env.SPOOF_HOURS) || s.settings.hoursDefault || 1;
-  let titlesWanted =
-    Number.isFinite(args.titles) && args.titles > 0
-      ? Math.floor(args.titles)
-      : Number(process.env.SPOOF_TITLES) || Math.min(50, ctx.games.length);
-
-  if (args.preset && PRESETS[args.preset]) {
-    const p = PRESETS[args.preset];
-    mode = p.mode || mode;
-    if (p.hours != null) hours = p.hours;
-    if (p.titles != null) titlesWanted = p.titles;
-    info(`preset ${args.preset}`);
+  if (runtime.isOffline()) {
+    log.info("OFFLINE PREVIEW · fictional demo catalog · nothing sent or saved");
+    await session.begin();
+    return { games: await games.loadGames() };
   }
-
-  // --target N means forge until vault hours reach N (playtime) or stream hours
-  if (Number.isFinite(args.target) && args.target > 0) {
-    if (mode === "stream") {
-      const need = Math.max(0, args.target - (s.totals.streamHours || 0));
-      if (need <= 0) {
-        pass(`already at/above stream target ${args.target}h`);
-        return;
-      }
-      hours = need;
-      info(`target stream ${args.target}h · need ${fmt.hours(need)}`);
-    } else if (mode === "variety") {
-      const need = Math.max(0, Math.floor(args.target) - (s.totals.varietyTitles || 0));
-      if (need <= 0) {
-        pass(`already at variety target`);
-        return;
-      }
-      titlesWanted = need;
-    } else {
-      const need = Math.max(0, args.target - s.totals.hours);
-      if (need <= 0) {
-        pass(`already at/above playtime target ${args.target}h`);
-        return;
-      }
-      // spread across titles
-      titlesWanted = Math.min(titlesWanted, Math.max(5, Math.ceil(need)));
-      hours = need / titlesWanted;
-      info(`target playtime ${args.target}h · need ${fmt.hours(need)} across ${titlesWanted} titles`);
+  log.warn("Unofficial activity submission can violate Discord's terms and risk the account.");
+  log.info("Credentials remain in memory. Badge credit cannot be confirmed by this tool.");
+  seedFromEnv();
+  for (const [field, label, variable] of [["token", "Discord account token", "DISCORD_TOKEN"],
+    ["cookie", "Discord cookie header", "CF_CLEARANCE_COOKIE"]]) {
+    if (!s[field]) {
+      if (args.auto) throw new Error(variable + " is missing. Supply it privately through the process environment.");
+      s[field] = await ui.askSecret(label + ": ");
+      if (!s[field]) throw new Error(label + " is required.");
+      log.registerSecret(s[field]);
     }
   }
+  log.info("Loading Discord's game catalog…");
+  const catalog = await games.loadGames();
+  if (!catalog.length) throw new Error("The live catalog could not be loaded. No activity was submitted.");
+  await session.begin();
+  await session.renew();
+  log.info("Session ready · " + catalog.length + " catalog entries");
+  vault.save();
+  return { games: catalog };
+}
 
+async function runAuto(args, ctx) {
+  const s = vault.load();
+  const preset = args.preset ? PRESETS[args.preset] : {};
+  const mode = preset.mode || args.mode;
+  let hours = preset.hours ?? args.hours ?? s.settings.hoursDefault;
+  let count = preset.titles ?? args.titles ?? (mode === "variety" ? 100 : 20);
+  if (args.target !== null) {
+    const current = mode === "variety" ? s.totals.varietyTitles : mode === "stream" ? s.totals.streamHours : s.totals.hours;
+    const remaining = Math.max(0, args.target - current);
+    log.info("Target uses local accepted telemetry totals; Discord badge progress is unknown.");
+    if (!remaining) { log.info("Local target already met; no request made."); return; }
+    if (mode === "variety") count = remaining;
+    else if (mode === "stream") hours = remaining;
+    else hours = remaining; // divide by actual selected count below
+  }
   const catalog = features.filteredCatalog(ctx.games);
-  info(`auto mode=${mode} pace=${s.settings.pace} filter=${s.settings.catalogFilter}`);
-
+  if (!catalog.length) throw new Error("No catalog entries match the filter.");
+  const selected = features.pickRotating(catalog, count);
+  if (selected.length < count) log.info("Using " + selected.length + " available titles (requested " + count + ").");
+  if (mode === "playtime" && args.target !== null) hours /= selected.length;
   if (mode === "stream" || mode === "all") {
-    const streamHours = mode === "stream" ? hours : hours;
-    const sessions = Math.min(100, Math.max(1, Math.ceil(streamHours / 10)));
-    await features.executeStreamForge(features.pickRotating(catalog, sessions), streamHours, sessions);
+    const sessions = Math.min(catalog.length, 100, Math.max(1, Math.ceil(hours / 10)));
+    const result = await features.executeStreamForge(features.pickRotating(catalog, sessions), hours, sessions);
+    if (result.failed || result.cancelled || result.checkpointError || result.persistenceError) return;
   }
   if (mode === "variety" || mode === "all") {
-    await features.executeForge(features.pickRotating(catalog, titlesWanted), 1 / 60, "variety");
+    const result = await features.executeForge(selected, 1 / 60, "variety");
+    if (result.failed || result.cancelled || result.checkpointError || result.persistenceError) return;
   }
-  if (mode === "playtime" || mode === "all") {
-    await features.executeForge(features.pickRotating(catalog, titlesWanted), hours, "playtime");
-  }
-  if (mode === "next") {
-    await features.forgeToNextTier(ctx);
-  }
+  if (mode === "playtime" || mode === "all") await features.executeForge(selected, hours, "playtime");
 }
 
-async function main() {
-  const args = parseArgs(process.argv);
-  if (args.help) {
-    console.log(`
-  badges spoofer
-
-  node index.js
-  node index.js --auto --mode playtime|stream|variety|all|next
-  node index.js --auto --hours 2 --titles 40 --pace aggressive|drip
-  node index.js --auto --target 500 --mode playtime
-  node index.js --auto --preset max-variety|quick-play|dump-stream|…
-  node index.js --profile <name>
-  node index.js --filter all|verified|steam|no-launcher
-  node index.js --dry
-
-  Env: DISCORD_TOKEN  CF_CLEARANCE_COOKIE  SPOOF_HOURS  SPOOF_TITLES
-`);
-    return;
-  }
-
-  if (args.profile) {
+async function main(argv = process.argv) {
+  const args = parseArgs(argv);
+  if (args.help) { printHelp(); return; }
+  if (args.version) { console.log(VERSION); return; }
+  runtime.configure({ offline: !args.live, automatic: args.auto });
+  try {
+    if (!args.auto && !process.stdin.isTTY) throw new Error("Interactive mode needs a terminal. Try node index.js --demo.");
     vault.switchProfile(args.profile);
-    info(`profile → ${args.profile}`);
+    session.clear();
+    const ctx = await bootstrap(args);
+    if (args.auto) await runAuto(args, ctx);
+    else {
+      while (!runtime.signal().aborted) {
+        ui.paintMenu();
+        if (!await ui.showMenu(ctx)) break;
+      }
+    }
+    if (runtime.signal().aborted) process.exitCode = 130;
+  } finally {
+    vault.clearSecrets();
+    ui.closeRl();
   }
-
-  const ok = await bootstrap({ interactive: !args.auto });
-  if (!ok) return;
-
-  if (args.auto) {
-    await runAuto(args);
-    blank();
-    line();
-    info("auto run finished");
-    return;
-  }
-
-  for (;;) {
-    ui.paintMenu();
-    const again = await ui.showMenu(ctx);
-    if (!again) break;
-  }
-  blank();
-  line();
-  info("shutting down");
 }
 
-main()
-  .catch((err) => {
-    if (err && (err.name === "AbortError" || err.code === "ERR_USE_AFTER_CLOSE")) {
-      console.log();
-      fail("interrupted");
-    } else console.error(err);
-  })
-  .finally(() => ui.closeRl());
-
-process.on("SIGINT", () => {
-  console.log();
-  fail("interrupted");
-  ui.closeRl();
-  process.exit(130);
-});
+if (require.main === module) {
+  process.on("SIGINT", () => { runtime.cancel(); ui.closeRl(); process.exitCode = 130; });
+  process.on("SIGTERM", () => { runtime.cancel(); ui.closeRl(); process.exitCode = 130; });
+  main().catch(err => {
+    const interrupted = runtime.signal().aborted || err?.name === "AbortError";
+    log.fail(interrupted ? "Stopped. Accepted telemetry may already have reached Discord." : err.message || "Run failed.");
+    process.exitCode = interrupted ? 130 : 1;
+  }).finally(() => { vault.clearSecrets(); ui.closeRl(); });
+}
+module.exports = { parseArgs, main, runAuto, bootstrap, seedFromEnv, VERSION };
