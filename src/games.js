@@ -3,6 +3,8 @@
 const fs = require("fs");
 const path = require("path");
 const { PATHS, ENDPOINTS } = require("./config");
+const runtime = require("./runtime");
+const { request } = require("./http");
 
 const LAUNCHER_HINTS = [
   "launcher",
@@ -17,8 +19,8 @@ const LAUNCHER_HINTS = [
 ];
 
 function windowsExecutable(entry) {
-  for (const exe of entry.executables || []) {
-    if (exe && exe.os === "win32" && exe.name) return exe.name;
+  for (const exe of Array.isArray(entry.executables) ? entry.executables : []) {
+    if (exe && exe.os === "win32" && typeof exe.name === "string" && exe.name.trim()) return exe.name;
   }
   return "game.exe";
 }
@@ -28,10 +30,13 @@ function parseCatalog(raw) {
   const seen = new Set();
   const games = [];
   for (const entry of Array.isArray(data) ? data : []) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    if (typeof entry.id === "number" && !Number.isSafeInteger(entry.id)) continue;
+    if (entry.name != null && typeof entry.name !== "string") continue;
     const id = String(entry && entry.id != null ? entry.id : "");
     if (!/^\d+$/.test(id) || seen.has(id)) continue;
-    const execs = entry.executables || [];
-    if (!execs.some((e) => e && e.os === "win32" && e.name)) continue;
+    const execs = Array.isArray(entry.executables) ? entry.executables : [];
+    if (!execs.some((e) => e && e.os === "win32" && typeof e.name === "string" && e.name.trim())) continue;
     seen.add(id);
     const exe = windowsExecutable(entry);
     const name = entry.name || "Unknown";
@@ -43,7 +48,7 @@ function parseCatalog(raw) {
       id,
       name,
       exe,
-      verified: entry.verified !== false,
+      verified: entry.verified === true,
       steam: dist.some((d) => d.includes("steam")) || /steam/i.test(exe),
       launcher: LAUNCHER_HINTS.some((h) => exe.toLowerCase().includes(h) || name.toLowerCase().includes(h)),
     });
@@ -61,7 +66,7 @@ function applyFilter(games, filter) {
 }
 
 async function downloadCatalog() {
-  const res = await fetch(ENDPOINTS.catalog, { headers: { "User-Agent": "Mozilla/5.0" } });
+  const res = await request(ENDPOINTS.catalog, { headers: { "User-Agent": "Mozilla/5.0" } });
   if (!res.ok) throw new Error(`catalog http ${res.status}`);
   const raw = await res.text();
   try {
@@ -72,6 +77,7 @@ async function downloadCatalog() {
 }
 
 async function loadGames() {
+  if (runtime.isOffline()) return demoCatalog();
   let raw = "";
   if (fs.existsSync(PATHS.gameList)) {
     try {
@@ -99,4 +105,15 @@ function searchGames(games, query) {
   return games.filter((g) => g.name.toLowerCase().includes(q)).slice(0, 25);
 }
 
-module.exports = { loadGames, parseCatalog, searchGames, applyFilter };
+// Clearly fictional records for a genuinely offline, credential-free preview.
+// Live loading never uses these records or falls back to them.
+function demoCatalog() {
+  return Array.from({ length: 120 }, (_, i) => ({
+    id: String(900000000000000000n + BigInt(i)),
+    name: `Demo Game ${String(i + 1).padStart(3, "0")}`,
+    exe: `demo-${i + 1}.exe`, verified: true, steam: i % 2 === 0,
+    launcher: false, demo: true,
+  }));
+}
+
+module.exports = { loadGames, parseCatalog, searchGames, applyFilter, demoCatalog };
