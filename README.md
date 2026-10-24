@@ -46,7 +46,17 @@ node index.js --dry --profile gift --auto --mode variety --titles 100
 
 The menu retains playtime, title search, variety, experimental streaming, ladder estimates, profiles and tools. `--profile NAME` separates local settings and progress metadata; it does not save credentials. During an offline preview, profile changes are temporary.
 
-A deliberate `--live` launch enables network requests and local metadata storage. Interactive credential prompts mask input. Automatic use requires `DISCORD_TOKEN` and `CF_CLEARANCE_COOKIE` from the process environment; do not put credentials in command-line arguments, screenshots, shared files or committed configuration. Non-terminal secret prompting is refused instead of echoing sensitive input.
+A deliberate `--live` launch enables network requests and local metadata storage. Interactive credential prompts mask input. Automatic use requires `DISCORD_TOKEN` from the process environment and optionally accepts `CF_CLEARANCE_COOKIE`; do not put credentials in command-line arguments, screenshots, shared files or committed configuration. Non-terminal secret prompting is refused instead of echoing sensitive input.
+
+Version 4.1 adds an experimental direct sign-in option:
+
+```sh
+node index.js --live --signin
+```
+
+Enter your email or phone, password, and a current authenticator code if requested. The program signs in independently of any browser session, verifies the returned account identity, and then opens the menu. Signing in does not submit game activity. Passwords retain intentional spaces and all credential prompts are masked. Passwords, codes, session cookies and tokens are kept in process memory and never saved to metadata or logs.
+
+This uses Discord's undocumented user sign-in endpoints, not OAuth. It stops on CAPTCHA, extra account checks, unsupported authentication methods, rate limits or failed sign-in. It does not read browser profiles or cookies, solve challenges, or bypass verification. `--signin` requires an interactive terminal and cannot be combined with `--auto`. Ordinary OAuth login has no documented telemetry scope for this tool.
 
 Live metadata is kept in `.local/` by default. Set `BADGES_DATA_DIR` in the process environment to select another directory. The application never reads or writes `.env` files.
 
@@ -57,6 +67,8 @@ Each live profile binds to the account returned by Discord's identity endpoint. 
 ## Reporting and limitations
 
 Live accepted counts mean that the endpoint accepted the corresponding requests. They do **not** prove Discord credited the activity, granted a badge or updated its servers. Actual verified badge progress is unavailable to this application.
+
+Discord says badge progress can take time to reflect recent activity, without specifying a guaranteed update time. That delay does not establish that this tool's submissions will receive badge credit. See [Discord's official badge guide](https://support.discord.com/hc/en-us/articles/44369363856663-Discord-Profile-Badges-What-Each-Badge-Means).
 
 Streaming telemetry is experimental and its badge effect is unverified. This edition improves the program's reliability and handling of local data; it does not establish whether the badge method still works.
 
