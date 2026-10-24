@@ -15,6 +15,7 @@ const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
 const { ENDPOINTS, CLIENT } = require("./config");
 const vault = require("./vault");
+const { request } = require("./http");
 
 function userIdFromToken(token) {
   try {
@@ -43,17 +44,19 @@ function buildHeaders(extra = {}) {
 }
 
 async function mintAnalyticsToken(superPropsB64) {
-  const res = await fetch(ENDPOINTS.identity, {
+  const res = await request(ENDPOINTS.identity, {
     headers: buildHeaders({ "x-super-properties": superPropsB64 }),
   });
   if (!res.ok) throw new Error(`identity check failed (http ${res.status})`);
   const data = await res.json();
   if (!data || !data.analytics_token) throw new Error("no analytics token in response");
+  if (!data.id || !/^\d+$/.test(String(data.id))) throw new Error("Account response did not identify the authenticated user.");
+  vault.bindAccount(String(data.id));
   return data.analytics_token;
 }
 
 async function verifyToken() {
-  const res = await fetch(ENDPOINTS.identity, {
+  const res = await request(ENDPOINTS.identity, {
     headers: buildHeaders({ "x-super-properties": Buffer.from("{}").toString("base64") }),
   });
   if (!res.ok) throw new Error(`token rejected (http ${res.status})`);
